@@ -1,0 +1,11 @@
+[package]
+name = "dump-analyzers"
+version = "0.1.0"
+authors = ["Arkadiusz Guzinski <kermit@ag.de1.cc>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+#arrayvec = "0.5.2"
+arraystring = "0.3.0"
