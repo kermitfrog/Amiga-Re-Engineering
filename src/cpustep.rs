@@ -1,36 +1,39 @@
 use std::fs::File;
 use std::io::{self, BufRead};
-use arrayvec::{ArrayString};
-// use bincode::serde::{Serialize, Deserialize};
+use array_init::array_init;
 use serde::{Serialize, Deserialize};
+use serde_big_array;
 use rustc_serialize::{Encodable, Encoder};
 
+
+big_array! { BigArray; }
 #[derive(Serialize, Deserialize)]
 pub struct CpuStep {
-    data: [u32; 8],
-    address: [u32; 8],
-    usp: u32,
-    isp: u32,
-    sfc: u32,
-    dfc: u32,
-    cacr: u32,
-    vbr: u32,
-    caar: u32,
-    msp: u32,
-    t: u8,
-    s: bool,
-    m: bool,
-    x: bool,
-    n: bool,
-    z: bool,
-    v: bool,
-    c: bool,
-    imask: bool,
-    stp: bool,
-    pc: u32,
-    pc_note: ArrayString<[u8;24]>,
-    note: ArrayString<[u8;80]>,
-    pc_next: u32
+    pub data: [u32; 8],
+    pub address: [u32; 8],
+    pub usp: u32,
+    pub isp: u32,
+    pub sfc: u32,
+    pub dfc: u32,
+    pub cacr: u32,
+    pub vbr: u32,
+    pub caar: u32,
+    pub msp: u32,
+    pub t: u8,
+    pub s: bool,
+    pub m: bool,
+    pub x: bool,
+    pub n: bool,
+    pub z: bool,
+    pub v: bool,
+    pub c: bool,
+    pub imask: bool,
+    pub stp: bool,
+    pub pc: u32,
+    pub pc_note: [u8; 24],
+    #[serde(with = "BigArray")]
+    pub note: [u8; 64], // 62
+    pub pc_next: u32
 }
 
 impl CpuStep {
@@ -42,7 +45,6 @@ impl CpuStep {
                 return Ok(line);
             }
         }
-        let a = ArrayString::<[_; 24]>::new();
     }
 
     fn set_registers(arr: &mut [u32; 8], line1: &str, line2: &str) {
@@ -77,6 +79,9 @@ impl CpuStep {
         let lpn = CpuStep::read_line(lines, "Next PC")?;
         let line_next_pc = lpn.as_str();
 
+        let pc_note = line_pc.get(9..=32).unwrap_or_default().as_bytes();
+        let note = line_pc.get(34..line_pc.len()).unwrap_or_default().as_bytes();
+
         let step = CpuStep {
             data: d,
             address: a,
@@ -99,8 +104,12 @@ impl CpuStep {
             imask: line_bits.get(39..=39).unwrap_or("0") == "1",
             stp: line_bits.get(45..=45).unwrap_or("0") == "1",
             pc: u32::from_str_radix(line_pc.get(0..=7).unwrap_or("0").as_ref(), 16).unwrap_or_default(),
-            pc_note: ArrayString::from(line_pc.get(9..=32).unwrap_or_default()).unwrap_or_default(),
-            note: ArrayString::from(line_pc.get(34..line_pc.len()).unwrap_or_default()).unwrap_or_default(),
+            pc_note: array_init::array_init({
+                |i | if i < pc_note.len() {pc_note[i]} else {0x20}
+            }),
+            note:  array_init::array_init({
+                |i | if i < note.len()-1 {note[i]} else {0x20}
+            }),
             pc_next: u32::from_str_radix(line_next_pc.get(9..=16).unwrap_or("0").as_ref(), 16).unwrap_or_default()
         };
 
@@ -117,7 +126,7 @@ impl ToString for CpuStep {
            USP  {:08x} ISP  {:08x} SFC  {:08x} DFC  {:08x}\n\
            CACR {:08x} VBR  {:08x} CAAR {:08x} MSP  {:08x}\n\
            T={:02x} S={} M={} X={} N={} Z={} V={} C={} IMASK={} STP={}\n\
-           {:08x} {:>24} {}\
+           {:08x} {:>24} {}\n\
            Next PC: {:08x}\
          ",
             self.data[0], self.data[1], self.data[2], self.data[3],
@@ -128,8 +137,9 @@ impl ToString for CpuStep {
             self.cacr, self.vbr, self.caar, self.msp,
             self.t, self.s as u8, self.m as u8, self.x as u8, self.n as u8, self.z as u8,
                 self.v as u8, self.c as u8, self.imask as u8, self.stp as u8,
-            self.pc, &self.pc_note, &self.note,
-            self.pc_next)
+            self.pc, std::str::from_utf8(&self.pc_note).unwrap_or_default(),
+                std::str::from_utf8(&self.note).unwrap_or_default(),
+                self.pc_next)
     }
 }
 
