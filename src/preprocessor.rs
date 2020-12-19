@@ -1,7 +1,11 @@
 use std::fs::File;
 use std::io::{self, BufRead};
-use arraystring::{ArrayString, typenum::U24, typenum::U80};
+use arrayvec::{ArrayString};
+// use bincode::serde::{Serialize, Deserialize};
+use serde::{Serialize, Deserialize};
+use rustc_serialize::{Encodable, Encoder};
 
+#[derive(Serialize, Deserialize)]
 pub struct CpuStep {
     data: [u32; 8],
     address: [u32; 8],
@@ -24,8 +28,8 @@ pub struct CpuStep {
     imask: bool,
     stp: bool,
     pc: u32,
-    pc_note: ArrayString<U24>,
-    note: ArrayString<U80>,
+    pc_note: ArrayString<[u8;24]>,
+    note: ArrayString<[u8;80]>,
     pc_next: u32
 }
 
@@ -38,6 +42,7 @@ impl CpuStep {
                 return Ok(line);
             }
         }
+        let a = ArrayString::<[_; 24]>::new();
     }
 
     fn set_registers(arr: &mut [u32; 8], line1: &str, line2: &str) {
@@ -94,8 +99,8 @@ impl CpuStep {
             imask: line_bits.get(39..=39).unwrap_or("0") == "1",
             stp: line_bits.get(45..=45).unwrap_or("0") == "1",
             pc: u32::from_str_radix(line_pc.get(0..=7).unwrap_or("0").as_ref(), 16).unwrap_or_default(),
-            pc_note: line_pc.get(8..=32).unwrap_or_default().into(),
-            note: line_pc.get(35..=line_pc.len() - 1).unwrap_or_default().into(),
+            pc_note: ArrayString::from(line_pc.get(9..=32).unwrap_or_default()).unwrap_or_default(),
+            note: ArrayString::from(line_pc.get(34..line_pc.len()).unwrap_or_default()).unwrap_or_default(),
             pc_next: u32::from_str_radix(line_next_pc.get(9..=16).unwrap_or("0").as_ref(), 16).unwrap_or_default()
         };
 
@@ -127,3 +132,9 @@ impl ToString for CpuStep {
             self.pc_next)
     }
 }
+
+// impl Encodable for ArrayString<[u8;24]> {
+//     fn encode<S: Encoder>(&self, s: &mut S) -> Result<(), <S as Encoder>::Error> {
+//         s.emit_nil()
+//     }
+// }
