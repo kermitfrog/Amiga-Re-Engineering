@@ -1,9 +1,6 @@
 use std::fs::File;
 use std::io::{self, BufRead};
-use array_init::array_init;
 use serde::{Serialize, Deserialize};
-use serde_big_array;
-use rustc_serialize::{Encodable, Encoder};
 
 
 big_array! { BigArray; }
@@ -37,10 +34,13 @@ pub struct CpuStep {
 }
 
 impl CpuStep {
-    fn read_line(lines: &mut io::BufReader<File>, start_with: &str) -> std::io::Result<String> {
+    fn read_line(lines: &mut io::BufReader<File>, start_with: &str) -> Result<String, i8> {
         loop {
             let mut line = String::new();
-            lines.read_line(&mut line)?;
+            lines.read_line(&mut line).unwrap(); // potential crash acceptable... TODO better...
+            if line.len() == 0 {
+                return Err(0)
+            }
             if line.starts_with(start_with) {
                 return Ok(line);
             }
@@ -58,7 +58,7 @@ impl CpuStep {
         }
     }
 
-    pub fn from_dump(lines: &mut io::BufReader<File>) -> std::io::Result<CpuStep> {
+    pub fn from_dump(lines: &mut io::BufReader<File>) -> Result<CpuStep, i8> {
         let mut d : [u32; 8] = Default::default();
         let mut a : [u32; 8] = Default::default();
         // CpuStep::set_registers(&mut d, line_data1, line_data2);
@@ -142,9 +142,3 @@ impl ToString for CpuStep {
                 self.pc_next)
     }
 }
-
-// impl Encodable for ArrayString<[u8;24]> {
-//     fn encode<S: Encoder>(&self, s: &mut S) -> Result<(), <S as Encoder>::Error> {
-//         s.emit_nil()
-//     }
-// }
