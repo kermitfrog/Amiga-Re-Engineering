@@ -115,6 +115,31 @@ impl CpuStep {
 
         Ok(step)
     }
+    // returns register mask
+    pub fn register_changed_to(&self, prev: &CpuStep, val: u32, mask: u32) -> u8 {
+        let mut result: u8 = 0;
+        let mut b: u8 = 1;
+        for i in 0..=7 {
+            if self.data[i] & mask == val && prev.data[i] & mask != val {
+                result |= b;
+            }
+            b *= 2;
+        }
+        result
+    }
+
+    /// returns change in call depth by this instruction
+    pub fn depth_mod(&self) -> i16 {
+        /*
+        +1 BSR, JSR
+        -1 RTS, RTR
+         */
+        match self.note.get(0..3).unwrap_or_default() {
+            [66, 83, 53] | [74, 83, 82] => 1,
+            [82, 84, 83] | [82, 84, 82] => -1,
+            _ => 0
+        }
+    }
 }
 
 impl ToString for CpuStep {
