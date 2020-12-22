@@ -1,6 +1,8 @@
 use std::fs::File;
 use std::io::{self, BufRead};
 use serde::{Serialize, Deserialize};
+use crate::utils::Colorizer;
+use crate::memdump::MemDump;
 
 
 big_array! { BigArray; }
@@ -29,8 +31,9 @@ pub struct CpuStep {
     pub pc: u32,
     pub pc_note: [u8; 24],
     #[serde(with = "BigArray")]
-    pub note: [u8; 64], // 62
-    pub pc_next: u32
+    pub note: [u8; 64],
+    // 62
+    pub pc_next: u32,
 }
 
 impl CpuStep {
@@ -39,7 +42,7 @@ impl CpuStep {
             let mut line = String::new();
             lines.read_line(&mut line).unwrap(); // potential crash acceptable... TODO better...
             if line.len() == 0 {
-                return Err(0)
+                return Err(0);
             }
             if line.starts_with(start_with) {
                 return Ok(line);
@@ -49,18 +52,18 @@ impl CpuStep {
 
     fn set_registers(arr: &mut [u32; 8], line1: &str, line2: &str) {
         // assert_eq!(len(line), 56);
-        let line = line1.get(0..line1.len()-1).unwrap().to_owned() + line2;
+        let line = line1.get(0..line1.len() - 1).unwrap().to_owned() + line2;
         let mut offset = 0;
         for i in arr {
-            let val = line.get(offset + 5 ..= offset + 12).unwrap_or_default();
+            let val = line.get(offset + 5..=offset + 12).unwrap_or_default();
             *i = u32::from_str_radix(val, 16).unwrap_or_default();
             offset += 14;
         }
     }
 
     pub fn from_dump(lines: &mut io::BufReader<File>) -> Result<CpuStep, i8> {
-        let mut d : [u32; 8] = Default::default();
-        let mut a : [u32; 8] = Default::default();
+        let mut d: [u32; 8] = Default::default();
+        let mut a: [u32; 8] = Default::default();
         // CpuStep::set_registers(&mut d, line_data1, line_data2);
         CpuStep::set_registers(&mut d,
                                CpuStep::read_line(lines, "  D0 ")?.as_str(),
@@ -105,12 +108,12 @@ impl CpuStep {
             stp: line_bits.get(45..=45).unwrap_or("0") == "1",
             pc: u32::from_str_radix(line_pc.get(0..=7).unwrap_or("0").as_ref(), 16).unwrap_or_default(),
             pc_note: array_init::array_init({
-                |i | if i < pc_note.len() {pc_note[i]} else {0x20}
+                |i| if i < pc_note.len() { pc_note[i] } else { 0x20 }
             }),
-            note:  array_init::array_init({
-                |i | if i < note.len()-1 {note[i]} else {0x20}
+            note: array_init::array_init({
+                |i| if i < note.len() - 1 { note[i] } else { 0x20 }
             }),
-            pc_next: u32::from_str_radix(line_next_pc.get(9..=16).unwrap_or("0").as_ref(), 16).unwrap_or_default()
+            pc_next: u32::from_str_radix(line_next_pc.get(9..=16).unwrap_or("0").as_ref(), 16).unwrap_or_default(),
         };
 
         Ok(step)
@@ -140,6 +143,62 @@ impl CpuStep {
             _ => 0
         }
     }
+
+    pub fn pretty_diff(&self, other: &CpuStep, mem: &MemDump, c: &Colorizer, num: usize) -> String {
+        let mut s = String::new();
+
+        // check data registers
+        let mut print_newline = false;
+        for i in 0..=7 {
+            if self.data[i] != other.data[i] {
+                print_newline = true;
+                s += format!("D{} {}->{}  ", i,
+                             c.col_reg(other.data[i]).as_str(),
+                             c.col_reg(self.data[i]).as_str()
+                ).as_str();
+            }
+        }
+        if print_newline {
+            s += "\n";
+        }
+        let note = std::str::from_utf8(&self.note).unwrap_or_default();
+        let print_memory =
+        match note.get(0..0).unwrap_or_default(){
+            "A" | "D" | "O" => true,
+            _ => {
+                match note.get(0..=1).unwrap_or_default() {
+                    "LS" | "RO" => true,
+                    _ => {
+                        match note.get(0..=2).unwrap_or_default() {
+                            "CMP" | "EOR" | "MUL" | "NEG" | "NOT" | "SBC" | "SUB" => true,
+                            _ => false
+                        }
+                    }
+                }
+            }
+        };
+        if print_memory {
+            print_newline = false;
+            for i in 2..self.note.len() - 1 {
+                let x = self.note.get(i..=i+1).unwrap();
+                match x {
+                    [65, 48..=57] => {
+                        print_newline = true;
+                        let idx = (x[1] - 48) as usize;
+                        let addr = self.address[idx];
+                        s += format!("A{}: {}  ", idx, c.col(mem.get_mem_at(addr, 4))).as_str();
+                    }
+                    _ => {}
+                }
+            }
+            if print_newline {
+                s += "\n";
+            }
+        }
+        s += format!("------ -{} \n\x1b[1m{:08X}\x1b[0m  {}\n", num, self.pc,
+                     std::str::from_utf8(&self.note).unwrap_or_default()).as_str();
+        s
+    }
 }
 
 impl ToString for CpuStep {
@@ -154,15 +213,15 @@ impl ToString for CpuStep {
            {:08x} {:>24} {}\n\
            Next PC: {:08x}\
          ",
-            self.data[0], self.data[1], self.data[2], self.data[3],
-            self.data[4], self.data[5], self.data[6], self.data[7],
-            self.address[0], self.address[1], self.address[2], self.address[3],
-            self.address[4], self.address[5], self.address[6], self.address[7],
-            self.usp, self.isp, self.sfc, self.dfc,
-            self.cacr, self.vbr, self.caar, self.msp,
-            self.t, self.s as u8, self.m as u8, self.x as u8, self.n as u8, self.z as u8,
+                self.data[0], self.data[1], self.data[2], self.data[3],
+                self.data[4], self.data[5], self.data[6], self.data[7],
+                self.address[0], self.address[1], self.address[2], self.address[3],
+                self.address[4], self.address[5], self.address[6], self.address[7],
+                self.usp, self.isp, self.sfc, self.dfc,
+                self.cacr, self.vbr, self.caar, self.msp,
+                self.t, self.s as u8, self.m as u8, self.x as u8, self.n as u8, self.z as u8,
                 self.v as u8, self.c as u8, self.imask as u8, self.stp as u8,
-            self.pc, std::str::from_utf8(&self.pc_note).unwrap_or_default(),
+                self.pc, std::str::from_utf8(&self.pc_note).unwrap_or_default(),
                 std::str::from_utf8(&self.note).unwrap_or_default(),
                 self.pc_next)
     }

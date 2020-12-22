@@ -1,9 +1,11 @@
 use crate::cpustep::CpuStep;
-use std::collections::{HashMap, BTreeMap, BTreeSet};
+use std::collections::{HashMap, BTreeMap, BTreeSet, HashSet};
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use serde::{Serialize, Deserialize};
 use std;
+use crate::memdump::MemDump;
+use crate::utils::Colorizer;
 
 #[derive(Serialize, Deserialize)]
 pub struct Dump {
@@ -88,28 +90,34 @@ impl Dump {
         }
     }
 
-    pub fn search_for_register_change(&self, val: u32, size: u8, _in_pcs: Option<Vec<u32>>) {
+    pub fn search_for_register_change(&self, val: u32, size: u8, _in_pcs: Option<HashSet<u32>>) -> HashSet<u32> {
         let mask: u32 = match size {
             1 => 0x000000FF,
             2 => 0x0000FFFF,
             _ => 0xFFFFFFFF
         };
 
+        let mut found: HashSet<u32> = HashSet::new();
         for cs in self.singles.values() {
-            self.search_for_register_change_from(*cs, val, mask);
+            found.extend(self.search_for_register_change_from(*cs, val, mask));
         }
+        found
     }
-    pub fn search_for_register_change_from(&self, start: usize, val: u32, mask: u32) {
+    pub fn search_for_register_change_from(&self, start: usize, val: u32, mask: u32) -> HashSet<u32> {
         let mut to_go = 1000;
         let mut index = start;
         let mut depth: i16 = 0;
         let mut last: &CpuStep = self.steps.get(index).unwrap();
+        let mut found: HashSet<u32> = HashSet::new();
         loop {
             index += 1;
             match self.steps.get(index + 1) {
                 Some(current) => {
                     // println!("{}", current.to_string());
                     let mut res = current.register_changed_to(last, val, mask);
+                    if res != 0 {
+                        found.insert(current.pc);
+                    }
                     let mut idx = 0;
                     while res != 0 {
                         if res & 1 == 1 {
@@ -130,6 +138,7 @@ impl Dump {
                 None => break
             }
         }
+        found
     }
 
     pub fn first_index_of_pc(&self, pc: u32) -> Result<usize, &str> {
@@ -173,5 +182,36 @@ impl Dump {
         let end = (to + 0x100) & 0xffffff80;
         let lines = (end - start) / 16;
         println!("m {:08x} {}", start, lines);
+    }
+
+    pub fn inspect(&self, mem: MemDump, pc: u32, num_before: usize, highlight: Vec<String>) -> Result<(), &str> {
+        // general preparation
+        let end = self.first_index_of_pc(pc)?;
+        let start = if end > num_before { end - num_before } else { 0 } + 1;
+        let mut current = self.steps.get(start).expect("cpu step not found");
+
+        // prepare colors
+        let colors = [
+            "\x1b[32m", // green
+            "\x1b[35m", // magenta
+            "\x1b[36m", // cyan
+            "\x1b[34m", // blue
+            "\x1b[31m", // red
+            "\x1b[33m", // yellow
+        ];
+        let mut replacements: Vec<(String, String)> = Vec::new();
+        replacements.reserve(highlight.len());
+        for (h, i) in highlight.iter().zip(0..) {
+            replacements.push((h.to_string(), format!("{}{}\x1b[0m",
+                                                      colors.get(i % colors.len()).unwrap(), h)));
+        }
+        let col = Colorizer{repl: replacements};
+
+        for i in start..=end {
+            let last = current;
+            current = self.steps.get(i).expect("cpu step not found");
+            print!("{}", current.pretty_diff(&last, &mem, &col, end - i));
+        }
+        Ok(())
     }
 }

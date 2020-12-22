@@ -1,6 +1,7 @@
 mod cpustep;
 mod dump;
 mod memdump;
+mod utils;
 
 extern crate serde;
 extern crate serde_derive;
@@ -23,8 +24,8 @@ fn main() -> std::io::Result<()> {
     let args: Vec<String> = env::args().collect();
     let mut dumps: Vec<Dump> = Vec::new();
     let mut values: Vec<u32> = Vec::new();
-    let mode = &args[1];
-    match mode.as_str() {
+    let mode = (if args.len() > 1 {&args[1]} else {"h"});
+    match mode {
         "d" => { // search for value in dump :: dir val [dir val] ..
             let mut i = 2;
             loop {
@@ -43,6 +44,7 @@ fn main() -> std::io::Result<()> {
                 }
             }
             let i = 0;
+            // let mut pcs;
             for dump in dumps {
                 dump.search_for_register_change(*values.get(i).unwrap(), 2, None);
             }
@@ -52,13 +54,44 @@ fn main() -> std::io::Result<()> {
             let pc = u32::from_str_radix(args[3].as_str(), 16).unwrap();
             let num_before = usize::from_str_radix(args[4].as_str(), 10).unwrap();
             let dump = Dump::from_dir(path.to_string())?;
-            dump.dump_memlist_cmds(pc, num_before);
+            dump.dump_memlist_cmds(pc, num_before).expect("meh!");
         }
-        "md" => {
+        "md" => { //
             let path = &args[2];
-            let md = MemDump::from_dir(path.to_string());
+            let _md = MemDump::from_dir(path.to_string());
         }
-        _ => {}
+        "i" => { // inspect.. dir pc pre [highlight str]*
+            let path = &args[2];
+            let pc = u32::from_str_radix(args[3].as_str(), 16).unwrap();
+            let num_before = usize::from_str_radix(args[4].as_str(), 10).unwrap();
+            let mut highlight : Vec<String> = Vec::new();
+            for i in 5..args.len() {
+                highlight.push(args[i].to_owned());
+            }
+            let mem: MemDump = match MemDump::from_dir(path.to_string()) {
+                Ok(m) => m,
+                Err(_) => MemDump::new()
+            };
+            Dump::from_dir(path.to_string()).expect("could not load dump")
+                .inspect(mem, pc, num_before, highlight);
+        }
+        _ => {
+            println!("\
+           {} [d|m|i] parameters\n\
+           ... dir   is directory containing dump, named opcode.log\n\
+           ... pc    is the programm counter (value displayed above \"Next PC:\" in dump\n\
+           ... count is number of instructions before pc\n\n\
+           d => search for value (dec) in dump\n\
+           $ d dir val [dir val] .. \n\n\
+           m => print commands to get memdump for related addresses from fs-uae debugger\n\
+                $ m dir pc count\n\n\
+           i => print summary of instructions leading to pc (uses linux terminal colors)\n\
+                val is value to highlight (format as displayed, pairs of two [0-9,A-Z])\n\
+                $ m dir pc count [val]*  | less -R \n\n\
+           The program preprocesses opcode.log to opcode.bin for faster loading.\n\
+           If .log or program version has changed, you should delete .bin"
+            , args[0]);
+        }
     }
 
     // let file = File::open("/home/harddisk/arek/amiga/ambm/uae-dumps/valdyn_6_dmg/opcode.log")?;
