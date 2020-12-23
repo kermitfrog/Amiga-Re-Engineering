@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::{self, BufRead};
 use serde::{Serialize, Deserialize};
-use crate::utils::Colorizer;
+use crate::utils::FormatHelper;
 use crate::memdump::MemDump;
 
 
@@ -144,7 +144,7 @@ impl CpuStep {
         }
     }
 
-    pub fn pretty_diff(&self, other: &CpuStep, mem: &MemDump, c: &Colorizer, num: usize) -> String {
+    pub fn pretty_diff(&self, other: &CpuStep, mem: &MemDump, c: &FormatHelper, num: usize, depth: &mut i8) -> String {
         let mut s = String::new();
 
         // check data registers

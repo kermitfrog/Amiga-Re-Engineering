@@ -5,7 +5,7 @@ use std::io::{BufReader, BufWriter};
 use serde::{Serialize, Deserialize};
 use std;
 use crate::memdump::MemDump;
-use crate::utils::Colorizer;
+use crate::utils::FormatHelper;
 
 #[derive(Serialize, Deserialize)]
 pub struct Dump {
@@ -190,27 +190,12 @@ impl Dump {
         let start = if end > num_before { end - num_before } else { 0 } + 1;
         let mut current = self.steps.get(start).expect("cpu step not found");
 
-        // prepare colors
-        let colors = [
-            "\x1b[32m", // green
-            "\x1b[35m", // magenta
-            "\x1b[36m", // cyan
-            "\x1b[34m", // blue
-            "\x1b[31m", // red
-            "\x1b[33m", // yellow
-        ];
-        let mut replacements: Vec<(String, String)> = Vec::new();
-        replacements.reserve(highlight.len());
-        for (h, i) in highlight.iter().zip(0..) {
-            replacements.push((h.to_string(), format!("{}{}\x1b[0m",
-                                                      colors.get(i % colors.len()).unwrap(), h)));
-        }
-        let col = Colorizer{repl: replacements};
-
+        let fmt = FormatHelper::for_values(&highlight);
+        let mut depth: i8 = 0;
         for i in start..=end {
             let last = current;
             current = self.steps.get(i).expect("cpu step not found");
-            print!("{}", current.pretty_diff(&last, &mem, &col, end - i));
+            print!("{}", current.pretty_diff(&last, &mem, &fmt, end - i, &mut depth));
         }
         Ok(())
     }

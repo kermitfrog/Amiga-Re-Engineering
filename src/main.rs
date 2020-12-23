@@ -75,6 +75,21 @@ fn main() -> std::io::Result<()> {
             Dump::from_dir(path.to_string()).expect("could not load dump")
                 .inspect(mem, pc, num_before, highlight);
         }
+        "s" => { // summary dir pc pre [highlight str]*
+            let path = &args[2];
+            let pc = u32::from_str_radix(args[3].as_str(), 16).unwrap();
+            let num_before = usize::from_str_radix(args[4].as_str(), 10).unwrap();
+            let mut highlight: Vec<String> = Vec::new();
+            for i in 5..args.len() {
+                highlight.push(args[i].to_owned());
+            }
+            let mem: MemDump = match MemDump::from_dir(path.to_string()) {
+                Ok(m) => m,
+                Err(_) => MemDump::new()
+            };
+            Dump::from_dir(path.to_string()).expect("could not load dump")
+                .inspect(mem, pc, num_before, highlight);
+        }
         _ => {
             println!("\
            {} [d|m|i] parameters\n\
