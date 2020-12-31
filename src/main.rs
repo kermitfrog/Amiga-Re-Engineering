@@ -9,13 +9,12 @@ extern crate serde_derive;
 extern crate serde_big_array;
 
 use std::env;
-// use std::fs::File;
-// use std::io::BufReader;
 use crate::dump::Dump;
 use crate::memdump::MemDump;
 use crate::utils::FormatHelper;
 use std::fs::File;
 use std::io::{BufReader, BufRead};
+use std::collections::BTreeMap;
 
 extern crate rustc_serialize;
 
@@ -25,32 +24,13 @@ fn main() -> std::io::Result<()> {
         if !opcode.bin -> transform opcode.log to opcode.bin
      */
     let args: Vec<String> = env::args().collect();
-    let mut dumps: Vec<Dump> = Vec::new();
-    let mut values: Vec<u32> = Vec::new();
     let mode = if args.len() > 1 { &args[1] } else { "h" };
     match mode {
         "d" => { // search for value in dump :: dir val [dir val] ..
-            let mut i = 2;
-            loop {
-                let path = &args[i];
-                let dump_r = Dump::from_dir(path.to_string());
-                match dump_r {
-                    Ok(dump) => { dumps.push(dump); }
-                    Err(_) => { println!("ERROR"); }
-                }
-                // let dump = Dump::from_dir(path.to_string())?;
-                // dumps.push(dump);
-                values.push(u32::from_str_radix(args[i + 1].as_str(), 10).unwrap_or_default());
-                i += 2;
-                if i >= args.len() - 1 {
-                    break;
-                }
-            }
-            let i = 0;
-            // let mut pcs;
-            for dump in dumps {
-                dump.search_for_register_change(*values.get(i).unwrap(), 2, None);
-            }
+            search_value(&args, false);
+        }
+        "D" => { // search for value in dump :: dir val [dir val] ..
+            search_value(&args, true);
         }
         "m" => { // get mem info commands :: dump pc num_before
             let path = &args[2];
@@ -59,7 +39,7 @@ fn main() -> std::io::Result<()> {
             let dump = Dump::from_dir(path.to_string())?;
             dump.dump_memlist_cmds(pc, num_before).expect("meh!");
         }
-        "md" => { //
+        "md" => { // parse memdump -- this is just for testing
             let path = &args[2];
             let _md = MemDump::from_dir(path.to_string());
         }
@@ -104,7 +84,9 @@ fn main() -> std::io::Result<()> {
            s => compact version of the above\n\n\
            g => generate ghidra insruction pattern search text for code at pc\n\n\
                 $ g dir pc count\n\n\n\
-           I|S => like i|s, but subtract value in dir/offset from pc
+           I|S => like i|s, but subtract value in dir/offset from pc\n\
+           Do NOT rely on printed memory content! The values are at the time, the memory dump was made\n\
+           and might have changed since then!
            The program preprocesses opcode.log to opcode.bin for faster loading.\n\
            If .log or program version has changed, you should delete .bin"
                      , args[0]);
@@ -149,7 +131,8 @@ fn stack(args: &Vec<String>, use_offset: bool) {
     let offset = if use_offset { get_offset(path) } else { 0 };
     let fmt = FormatHelper::simple(true, 2, offset);
 
-    Dump::from_dir(path.to_string()).expect("could not load dump").stack(pc, fmt);
+    Dump::from_dir(path.to_string()).expect("could not load dump").stack(pc, fmt)
+        .expect("failed reading dump ");
 }
 
 fn get_offset(path: &String) -> u32 {
@@ -162,5 +145,36 @@ fn get_offset(path: &String) -> u32 {
             u32::from_str_radix(&s.trim_end(), 16).unwrap_or_default()
         }
         Err(_) => 0u32
+    }
+}
+
+fn search_value(args: &Vec<String>, use_offset: bool) {
+    let mut dumps: Vec<Dump> = Vec::new();
+    let mut values: Vec<u32> = Vec::new();
+    let mut i = 2;
+    let offset = if use_offset { get_offset(&args[2]) } else { 0 };
+    loop {
+        let path = &args[i];
+        let dump_r = Dump::from_dir(path.to_string());
+        match dump_r {
+            Ok(dump) => { dumps.push(dump); }
+            Err(_) => { println!("ERROR"); }
+        }
+        // let dump = Dump::from_dir(path.to_string())?;
+        // dumps.push(dump);
+        values.push(u32::from_str_radix(args[i + 1].as_str(), 10).unwrap_or_default());
+        i += 2;
+        if i >= args.len() - 1 {
+            break;
+        }
+    }
+    let mut i = 0;
+    let mut results: Option<BTreeMap<u32, String>> = None;
+    for dump in dumps {
+        results = Some(dump.search_for_register_change(*values.get(i).unwrap(), 2, results));
+        i += 1;
+    }
+    for (k, v) in results.unwrap_or_default() {
+        println!("{:08X}{}", k - offset, v);
     }
 }

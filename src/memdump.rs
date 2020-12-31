@@ -3,18 +3,22 @@ use std::io::{BufReader, BufRead};
 use std::cmp::{min, max};
 
 pub struct MemDump {
+    /// structure for a partial memory dump
     parts: Vec<MemPart>
 }
 
 struct MemPart {
+    /// structure for a consecutive part of MemDump
     from: u32,
     to: u32,
     data: Vec<u8>,
 }
 
 impl MemDump {
+    /// create empty MemDump
     pub fn new() -> MemDump {MemDump{parts: Vec::new()}}
 
+    /// load MemDump from a file called mem in directory path
     /// expects fs-uae memdump from debugger, '>' removed, newline at end
     pub fn from_dir(path: String) -> std::io::Result<MemDump> {
         let file = File::open(path.to_owned() + "/mem")?;
@@ -49,6 +53,7 @@ impl MemDump {
         Ok(mem_dump)
     }
 
+    /// returns count bytes from MemDump at address addr, or "??" if addr is not in current dump
     pub fn get_mem_at(&self, addr: u32, count: usize) -> String {
         for part in &self.parts {
             if (part.from..=part.to).contains(&addr) {

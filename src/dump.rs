@@ -1,5 +1,5 @@
 use crate::cpustep::CpuStep;
-use std::collections::{HashMap, BTreeMap, BTreeSet, HashSet};
+use std::collections::{HashMap, BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use serde::{Serialize, Deserialize};
@@ -9,14 +9,21 @@ use crate::utils::FormatHelper;
 use std::cmp::min;
 
 #[derive(Serialize, Deserialize)]
+/// represents an uae instruction dump
 pub struct Dump {
     // name: str,
+    /// map of program counters, that are only found once in the dump. These are likely what the
+    /// user is searching for. The second value is the number of consecutive pcs, starting with the
+    /// first value.
     singles: HashMap<u32, usize>,
     // PC -> Offset
+    /// the individual instructions and their register contents
     steps: Vec<CpuStep>,
 }
 
 impl Dump {
+    /// loads the Dump from the directory, specified by path. Reads a cache file named opcode.bin, or
+    /// creates it from opcode.log
     pub fn from_dir(path: String) -> std::io::Result<Dump> {
         // let name =
         let file_res = File::open(path.to_owned() + "/opcode.bin");
@@ -24,7 +31,6 @@ impl Dump {
             Ok(file) => {
                 let buf_reader = BufReader::new(file);
                 let dump: Dump = bincode::deserialize_from(buf_reader).expect("Reading failed");
-                println!("finished reading");
                 Ok(dump)
             }
             Err(_) => {
@@ -91,43 +97,81 @@ impl Dump {
         }
     }
 
-    pub fn search_for_register_change(&self, val: u32, size: u8, _in_pcs: Option<HashSet<u32>>) -> HashSet<u32> {
+    /// Searches individual dumped instruction for a data change to value val.
+    ///
+    /// If previous is not None, the result will only contain changes that were present at pcs in
+    /// previous, as well as those found in this self.
+    /// The function does not search the whole dump, but instead searches beginning from each key
+    /// of self.singles and stops when reaching a lower call depth then it started with
+    ///
+    /// val: value to search for
+    /// size: expected size of value in bytes (1, 2, anything else will search 4 bytes)
+    /// previous: should be result of the last call to this function
+    ///
+    /// returns: Sorted Map of pc to String describing register changes
+    pub fn search_for_register_change(&self, val: u32, size: u8, previous: Option<BTreeMap<u32, String>>)
+                                      -> BTreeMap<u32, String> {
         let mask: u32 = match size {
             1 => 0x000000FF,
             2 => 0x0000FFFF,
             _ => 0xFFFFFFFF
         };
 
-        let mut found: HashSet<u32> = HashSet::new();
+        let mut found: BTreeMap<u32, String> = BTreeMap::new();
         for cs in self.singles.values() {
             found.extend(self.search_for_register_change_from(*cs, val, mask));
         }
-        found
+
+        match previous {
+            None => found,
+            Some(found_earlier) => {
+                let mut result: BTreeMap<u32, String> = BTreeMap::new();
+                for key in found_earlier.keys() {
+                    if found.contains_key(key) {
+                        let i = *key;
+                        result.insert(i, found_earlier[&i].to_string() + found[&i].as_str());
+                    }
+                }
+                result
+            }
+        }
     }
-    pub fn search_for_register_change_from(&self, start: usize, val: u32, mask: u32) -> HashSet<u32> {
-        let mut to_go = 1000;
+
+    /// Finds register changes to value val
+    ///
+    /// start: start at steps[start]
+    /// val: value to look for
+    /// mask: bitmask for value (all saved values are 32 bit)
+    ///
+    /// returns: Map of pc, description of change (e.g. ", D0: 15 -> 14")
+    fn search_for_register_change_from(&self, start: usize, val: u32, mask: u32)
+                                           -> BTreeMap<u32, String> {
+        // maximum of instructions to search
+        let mut to_go = 10000;
         let mut index = start;
+        // we track depth, so we can return when reaching the function, that called the one at start
         let mut depth: i16 = 0;
         let mut last: &CpuStep = self.steps.get(index).unwrap();
-        let mut found: HashSet<u32> = HashSet::new();
+        let mut found: BTreeMap<u32, String> = BTreeMap::new();
         loop {
             index += 1;
             match self.steps.get(index + 1) {
                 Some(current) => {
                     // println!("{}", current.to_string());
                     let mut res = current.register_changed_to(last, val, mask);
-                    if res != 0 {
-                        found.insert(current.pc);
-                    }
                     let mut idx = 0;
-                    while res != 0 {
-                        if res & 1 == 1 {
-                            println!("{:08X}, D{}: {:x} -> {:x} ", current.pc, idx,
-                                     last.data[idx], current.data[idx])
+                    if res != 0 {
+                        let mut s = String::new();
+                        while res != 0 {
+                            if res & 1 == 1 {
+                                s += format!(", D{}: {:x} -> {:x} ", idx,
+                                             last.data[idx], current.data[idx]).as_str();
+                            }
+                            res /= 2;
+                            idx += 1;
+                            // println!("{}", current.to_string());
                         }
-                        res /= 2;
-                        idx += 1;
-                        // println!("{}", current.to_string());
+                        found.insert(current.pc, s);
                     }
                     last = current;
                     to_go -= 1;
@@ -142,7 +186,8 @@ impl Dump {
         found
     }
 
-    pub fn first_index_of_pc(&self, pc: u32) -> Result<usize, &str> {
+    /// finds first index of pc in self.steps
+    fn first_index_of_pc(&self, pc: u32) -> Result<usize, &str> {
         for idx in 0..self.steps.len() {
             if self.steps[idx].pc == pc {
                 return Ok(idx);
@@ -151,7 +196,12 @@ impl Dump {
         Err("PC not found")
     }
 
+    /// tries to create commands, to get memdumps from uae's debug mode, containing all memory at
+    /// the addresses that were in address registers at some time (plus some padding for context).
+    /// So far, only works for memory directly in address registers, not for directly specified or
+    /// accessed with offset
     pub fn dump_memlist_cmds(&self, pc: u32, num_before: usize) -> Result<(), &str> {
+        // find addresses
         let inclusive: u32 = 128;
         let mut addresses: BTreeSet<u32> = BTreeSet::new();
         let end = self.first_index_of_pc(pc)?;
@@ -163,6 +213,7 @@ impl Dump {
             }
         }
 
+        // create ranges, containing those addresses
         let mut iter = addresses.iter();
         let mut first = *iter.next().unwrap();
         let mut last = first;
@@ -178,6 +229,7 @@ impl Dump {
         Ok(())
     }
 
+    /// prints command for dump_memlist_cmds
     fn print_m_range(from: u32, to: u32) {
         let start = from & 0xffffff80;
         let end = (to + 0x100) & 0xffffff80;
@@ -185,6 +237,12 @@ impl Dump {
         println!("m {:08x} {}", start, lines);
     }
 
+    /// prints a summary of instructions and data changes, leading to pc
+    ///
+    /// mem: MemDump, that can (partially) resolve references in address registers (can be empty)
+    /// pc: program counter at which to start (first occurrence in dump will be used)
+    /// num_before: print a maximum of num_before instructions prior to pc
+    /// fmt: contains formatting options
     pub fn inspect(&self, mem: MemDump, pc: u32, num_before: usize, fmt: FormatHelper) -> Result<(), &str> {
         // general preparation
         let end = self.first_index_of_pc(pc)?;
@@ -205,6 +263,11 @@ impl Dump {
         }
         Ok(())
     }
+
+    /// print a string that can be pasted into ghidra's instruction search (hex mode)
+    ///
+    /// pc: instruction to start at
+    /// num_after: include this many following instructions
     pub fn ghidra_search(&self, pc: u32, num_after: usize) -> Result<(), &str> {
         let start = self.first_index_of_pc(pc)?;
         let end = start + num_after;
@@ -217,21 +280,25 @@ impl Dump {
                 Ok(s) => println!("{}", s),
                 Err(e) => {
                     println!("{}", e);
-                    return Ok(())
+                    return Ok(());
                 }
             }
         }
         Ok(())
     }
 
-    pub fn stack(&self, pc: u32, fmt: FormatHelper) -> Result<(), &str>{
+    /// print call hierarchy, leading to pc
+    ///
+    /// pc: program counter at the bottom of the hierarchy (first occurrence in dump will be used)
+    /// fmt: contains formatting options
+    pub fn stack(&self, pc: u32, fmt: FormatHelper) -> Result<(), &str> {
         let mut idx = self.first_index_of_pc(pc)?;
         let mut depth: i16 = 0;
         let mut min_depth: i16 = 0;
         let mut current = self.steps.get(idx).expect("cpu step not found");
-        let mut lines : Vec<String> = Vec::new();
+        let mut lines: Vec<String> = Vec::new();
         lines.push(format!("{:08X}  {}", current.pc - fmt.offset_mod,
-            std::str::from_utf8(&current.note).unwrap_or_default()));
+                           std::str::from_utf8(&current.note).unwrap_or_default()));
 
         loop {
             let last = current;

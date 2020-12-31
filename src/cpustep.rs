@@ -4,10 +4,12 @@ use serde::{Serialize, Deserialize};
 use crate::utils::FormatHelper;
 use crate::memdump::MemDump;
 
-
+// use BigArray, as this is needed to allow serde to handle arrays beyond 32 elements
 big_array! { BigArray; }
 #[derive(Serialize, Deserialize)]
 pub struct CpuStep {
+    /// an instruction step, containing the info about register state from fs-uae. note is the
+    /// instruction as disassembled by fs-uae.
     pub data: [u32; 8],
     pub address: [u32; 8],
     pub usp: u32,
@@ -37,6 +39,12 @@ pub struct CpuStep {
 }
 
 impl CpuStep {
+    /// helper function to read a line from the dump, trying to skip output, that is not part of the
+    /// data we are looking for.
+    ///
+    /// lines: BufReader with position at the beginning of the next line
+    /// start_with: expected condition. If the line does not start with this String, skip lines
+    /// until we find one that does.
     fn read_line(lines: &mut io::BufReader<File>, start_with: &str) -> Result<String, i8> {
         loop {
             let mut line = String::new();
@@ -50,6 +58,11 @@ impl CpuStep {
         }
     }
 
+    /// helper function to parse registers (D0-D7 or A0-A7) into an array
+    ///
+    /// arr: array to write into
+    /// line1 first line (containing D0-D3 or A0-A3)
+    /// line2 second line (containing D4-D7 or A4-A7)
     fn set_registers(arr: &mut [u32; 8], line1: &str, line2: &str) {
         // assert_eq!(len(line), 56);
         let line = line1.get(0..line1.len() - 1).unwrap().to_owned() + line2;
@@ -61,6 +74,9 @@ impl CpuStep {
         }
     }
 
+    /// reads one instruction step and the register contents from the dump
+    ///
+    /// lines: BufReader with position at the beginning of the instruction step
     pub fn from_dump(lines: &mut io::BufReader<File>) -> Result<CpuStep, i8> {
         let mut d: [u32; 8] = Default::default();
         let mut a: [u32; 8] = Default::default();
@@ -118,7 +134,11 @@ impl CpuStep {
 
         Ok(step)
     }
-    // returns register mask
+    /// returns u8 with bits signifying which data registers have changed their value to val
+    ///
+    /// prev: instruction to compare with
+    /// val: value, we're looking for
+    /// mask: bit mask for value (e.g. if we're only interested it 16 bit values)
     pub fn register_changed_to(&self, prev: &CpuStep, val: u32, mask: u32) -> u8 {
         let mut result: u8 = 0;
         let mut b: u8 = 1;
@@ -126,7 +146,9 @@ impl CpuStep {
             if self.data[i] & mask == val && prev.data[i] & mask != val {
                 result |= b;
             }
-            b *= 2;
+            // Multiplication with intended (well, here: don't care) overflow.
+            // Otherwise, Rust will panic in debug mode (not in release)
+            b = b.wrapping_mul(2);
         }
         result
     }
@@ -144,6 +166,13 @@ impl CpuStep {
         }
     }
 
+    /// Generate String showing the difference between 2 instruction steps
+    ///
+    /// other: instruction steps to compare with
+    /// mem: Memory dump (for printing possible content, an address register is pointing at)
+    /// fmt: formatting configuration
+    /// num: number of steps until end pc is reached. Only printed at depth change.
+    /// depth: current call depth. Used for padding and modified on change.
     pub fn pretty_diff(&self, other: &CpuStep, mem: &MemDump, fmt: &FormatHelper, num: usize, depth: &mut i16) -> String {
         let mut s = String::new();
         let pad: usize = if *depth >= 0 {(*depth * fmt.indent) as usize} else {0};
@@ -169,6 +198,7 @@ impl CpuStep {
         if print_spacing {
             s += delimiter.as_str();
         }
+        // address registers are only parsed for certain instructions
         let note = std::str::from_utf8(&self.note).unwrap_or_default();
         let print_memory =
         match note.get(0..0).unwrap_or_default(){
@@ -217,6 +247,8 @@ impl CpuStep {
         }
         s
     }
+
+    /// print instruction in format, suitable for ghidra's instruction search feature
     pub fn print_for_search(&self, prev: &CpuStep) -> Result<String, &str> {
         let mut diff = (prev.pc_next - self.pc) as i32;
         return if diff == 0 {
@@ -237,6 +269,7 @@ impl CpuStep {
 }
 
 impl ToString for CpuStep {
+    /// output as from fs-uae
     fn to_string(&self) -> String {
         format!("  D0 {:08x}   D1 {:08x}   D2 {:08x}   D3 {:08x}\
            \n  D4 {:08x}   D5 {:08x}   D6 {:08x}   D7 {:08x}\

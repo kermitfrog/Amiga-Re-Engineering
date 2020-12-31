@@ -1,13 +1,20 @@
 
+/// stores variables for formatting the output
 pub struct FormatHelper {
+    /// replace occurrences of value1 with value2 - used for terminal colors / bold
     pub repl: Vec<(String, String)>,
+    /// use compact (1 line per instruction) output?
     pub compact: bool,
+    /// use colors?
     pub colors: bool,
+    /// how much space to use to indent per step of the call hierarchy
     pub indent: i16,
+    /// pc offset for disassembler
     pub offset_mod: u32
 }
 
 impl FormatHelper {
+    /// highlights values, by replacing them with colored versions
     pub fn col(&self, s: String) -> String {
         if !self.colors {
             return s
@@ -26,6 +33,7 @@ impl FormatHelper {
         t.to_string()
     }
 
+    /// return val as hex string, highlighting values, by replacing them with colored versions
     pub fn col_reg(&self, val: u32) -> String {
         let mut s = format!("{:08X}", val);
         for (v, r) in &self.repl {
@@ -36,6 +44,9 @@ impl FormatHelper {
         s
     }
 
+    /// construct FormatHelper with highlighting for certain values
+    ///
+    /// highlight: values to be colored
     pub fn for_values(highlight: &Vec<String>, compact: bool, indent: i16, offset_mod: u32) -> FormatHelper {
         // prepare colors
         let colors = [
@@ -54,6 +65,8 @@ impl FormatHelper {
         }
         FormatHelper {repl: replacements, compact, colors: true, indent, offset_mod}
     }
+
+    /// construct FormatHelper without highlighting
     pub fn simple(compact: bool, indent: i16, offset_mod: u32) -> FormatHelper{
         FormatHelper {repl: Vec::new(), compact, colors: false, indent, offset_mod}
     }
