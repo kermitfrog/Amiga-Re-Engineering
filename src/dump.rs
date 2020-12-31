@@ -6,6 +6,7 @@ use serde::{Serialize, Deserialize};
 use std;
 use crate::memdump::MemDump;
 use crate::utils::FormatHelper;
+use std::cmp::min;
 
 #[derive(Serialize, Deserialize)]
 pub struct Dump {
@@ -184,18 +185,71 @@ impl Dump {
         println!("m {:08x} {}", start, lines);
     }
 
-    pub fn inspect(&self, mem: MemDump, pc: u32, num_before: usize, highlight: Vec<String>) -> Result<(), &str> {
+    pub fn inspect(&self, mem: MemDump, pc: u32, num_before: usize, fmt: FormatHelper) -> Result<(), &str> {
         // general preparation
         let end = self.first_index_of_pc(pc)?;
         let start = if end > num_before { end - num_before } else { 0 } + 1;
         let mut current = self.steps.get(start).expect("cpu step not found");
-
-        let fmt = FormatHelper::for_values(&highlight);
-        let mut depth: i8 = 0;
+        // get base depth
+        let mut depth: i16 = 0;
+        let mut min_depth: i16 = 0;
+        for i in start..=end {
+            depth += self.steps.get(i).expect("cpu step not found").depth_mod();
+            min_depth = min(min_depth, depth);
+        }
+        depth = 0 - min_depth;
         for i in start..=end {
             let last = current;
             current = self.steps.get(i).expect("cpu step not found");
             print!("{}", current.pretty_diff(&last, &mem, &fmt, end - i, &mut depth));
+        }
+        Ok(())
+    }
+    pub fn ghidra_search(&self, pc: u32, num_after: usize) -> Result<(), &str> {
+        let start = self.first_index_of_pc(pc)?;
+        let end = start + num_after;
+        let mut current = self.steps.get(start).expect("cpu step not found");
+
+        for i in start..=end {
+            let last = current;
+            current = self.steps.get(i).expect("cpu step not found");
+            match current.print_for_search(&last) {
+                Ok(s) => println!("{}", s),
+                Err(e) => {
+                    println!("{}", e);
+                    return Ok(())
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn stack(&self, pc: u32, fmt: FormatHelper) -> Result<(), &str>{
+        let mut idx = self.first_index_of_pc(pc)?;
+        let mut depth: i16 = 0;
+        let mut min_depth: i16 = 0;
+        let mut current = self.steps.get(idx).expect("cpu step not found");
+        let mut lines : Vec<String> = Vec::new();
+        lines.push(format!("{:08X}  {}", current.pc - fmt.offset_mod,
+            std::str::from_utf8(&current.note).unwrap_or_default()));
+
+        loop {
+            let last = current;
+            current = self.steps.get(idx).expect("cpu step not found");
+            depth -= current.depth_mod();
+            if depth < min_depth {
+                lines.push(format!("{:08X}  {}", last.pc - fmt.offset_mod,
+                                   std::str::from_utf8(&last.note).unwrap_or_default()));
+                min_depth = depth;
+            }
+            if idx == 0 {
+                break;
+            }
+            idx -= 1;
+        }
+
+        for line in lines.iter().rev() {
+            println!("{}", line);
         }
         Ok(())
     }

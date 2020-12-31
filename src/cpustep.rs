@@ -144,22 +144,30 @@ impl CpuStep {
         }
     }
 
-    pub fn pretty_diff(&self, other: &CpuStep, mem: &MemDump, c: &FormatHelper, num: usize, depth: &mut i8) -> String {
+    pub fn pretty_diff(&self, other: &CpuStep, mem: &MemDump, fmt: &FormatHelper, num: usize, depth: &mut i16) -> String {
         let mut s = String::new();
+        let pad: usize = if *depth >= 0 {(*depth * fmt.indent) as usize} else {0};
+        // let pad_inline = if compact {0i16} else { pad };
+        let padding = format!("{:>width$}", "", width = pad);
+        let mut delimiter = String::new();
+        if fmt.compact {delimiter += "  "} else {
+            let nl = format!("\n{}", &padding);
+            delimiter += nl.as_str();
+        };
 
         // check data registers
-        let mut print_newline = false;
+        let mut print_spacing = false;
         for i in 0..=7 {
             if self.data[i] != other.data[i] {
-                print_newline = true;
+                print_spacing = true;
                 s += format!("D{} {}->{}  ", i,
-                             c.col_reg(other.data[i]).as_str(),
-                             c.col_reg(self.data[i]).as_str()
+                             fmt.col_reg(other.data[i]).as_str(),
+                             fmt.col_reg(self.data[i]).as_str()
                 ).as_str();
             }
         }
-        if print_newline {
-            s += "\n";
+        if print_spacing {
+            s += delimiter.as_str();
         }
         let note = std::str::from_utf8(&self.note).unwrap_or_default();
         let print_memory =
@@ -177,27 +185,54 @@ impl CpuStep {
                 }
             }
         };
-        if print_memory {
-            print_newline = false;
+        if print_memory { // TODO does not always work correctly
+            print_spacing = false;
             for i in 2..self.note.len() - 1 {
                 let x = self.note.get(i..=i+1).unwrap();
                 match x {
                     [65, 48..=57] => {
-                        print_newline = true;
+                        print_spacing = true;
                         let idx = (x[1] - 48) as usize;
                         let addr = self.address[idx];
-                        s += format!("A{}: {}  ", idx, c.col(mem.get_mem_at(addr, 4))).as_str();
+                        s += format!("A{}: {}  ", idx, fmt.col(mem.get_mem_at(addr, 4))).as_str();
                     }
                     _ => {}
                 }
             }
-            if print_newline {
-                s += "\n";
+            if print_spacing {
+                s += delimiter.as_str();
             }
         }
-        s += format!("------ -{} \n\x1b[1m{:08X}\x1b[0m  {}\n", num, self.pc,
-                     std::str::from_utf8(&self.note).unwrap_or_default()).as_str();
+        let depth_m = self.depth_mod();
+        if depth_m > 0 || other.depth_mod() < 0 {
+            s += format!("\n{}##-{:<5}", padding, num).as_str();
+        }
+        *depth += depth_m;
+        if fmt.compact {
+            s += format!("\n{}{:08X}  {}", padding, self.pc - fmt.offset_mod,
+                         std::str::from_utf8(&self.note).unwrap_or_default()).as_str();
+        } else {
+            s += format!("\n{}\x1b[1m{:08X}\x1b[0m  {}{}", padding, self.pc - fmt.offset_mod,
+                         std::str::from_utf8(&self.note).unwrap_or_default(), delimiter).as_str()
+        }
         s
+    }
+    pub fn print_for_search(&self, prev: &CpuStep) -> Result<String, &str> {
+        let mut diff = (prev.pc_next - self.pc) as i32;
+        return if diff == 0 {
+            Ok(std::str::from_utf8(&self.pc_note).unwrap_or_default().trim_end().to_string())
+        } else if diff < 0 {
+            Err("Negative step not implemented")
+        } else if diff > 80 {
+            Err("Big step -- aborting now")
+        } else {
+            let mut s = String::new();
+            while diff > 0 {
+                s += "[........] ";
+                diff -= 1;
+            }
+            Ok(s.trim_end().to_string())
+        }
     }
 }
 

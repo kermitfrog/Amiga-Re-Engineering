@@ -2,11 +2,16 @@
 pub struct FormatHelper {
     pub repl: Vec<(String, String)>,
     pub compact: bool,
-    pub indent: i8
+    pub colors: bool,
+    pub indent: i16,
+    pub offset_mod: u32
 }
 
 impl FormatHelper {
     pub fn col(&self, s: String) -> String {
+        if !self.colors {
+            return s
+        }
         let mut t = s.to_owned();
         // TODO this is buggy - need to work through list, then see if something can be found at
         // index. currently returning after first occurence, to prevent buggy output
@@ -31,7 +36,7 @@ impl FormatHelper {
         s
     }
 
-    pub fn for_values(highlight: &Vec<String>, compact: bool, indent: i8) -> FormatHelper {
+    pub fn for_values(highlight: &Vec<String>, compact: bool, indent: i16, offset_mod: u32) -> FormatHelper {
         // prepare colors
         let colors = [
             "\x1b[32m", // green
@@ -47,6 +52,9 @@ impl FormatHelper {
             replacements.push((h.to_string(), format!("{}{}\x1b[0m",
                                                       colors.get(i % colors.len()).unwrap(), h)));
         }
-        FormatHelper {repl: replacements, compact, indent }
+        FormatHelper {repl: replacements, compact, colors: true, indent, offset_mod}
+    }
+    pub fn simple(compact: bool, indent: i16, offset_mod: u32) -> FormatHelper{
+        FormatHelper {repl: Vec::new(), compact, colors: false, indent, offset_mod}
     }
 }
