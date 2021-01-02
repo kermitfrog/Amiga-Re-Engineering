@@ -1,3 +1,19 @@
+/*
+    Copyright (C) 2020 Arkadiusz Guzinski <kermit@ag.de1.cc>
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
 mod cpustep;
 mod dump;
 mod memdump;
@@ -84,7 +100,7 @@ fn main() -> std::io::Result<()> {
            s => compact version of the above\n\n\
            g => generate ghidra insruction pattern search text for code at pc\n\n\
                 $ g dir pc count\n\n\n\
-           I|S => like i|s, but subtract value in dir/offset from pc\n\
+           D|I|S => like d|i|s, but subtract value in dir/offset (one line, hex, no 0x) from pc\n\
            Do NOT rely on printed memory content! The values are at the time, the memory dump was made\n\
            and might have changed since then!
            The program preprocesses opcode.log to opcode.bin for faster loading.\n\
@@ -101,6 +117,9 @@ fn main() -> std::io::Result<()> {
     Ok(())
 }
 
+/// print short version of steps leading to pc
+///
+/// short: if true, use one line version without highlighting
 fn summary(args: &Vec<String>, short: bool, use_offset: bool) {
     let path = &args[2];
     let pc = u32::from_str_radix(args[3].as_str(), 16).unwrap();
@@ -125,6 +144,7 @@ fn summary(args: &Vec<String>, short: bool, use_offset: bool) {
         .inspect(mem, pc, num_before, fmt).expect("summary failed");
 }
 
+/// print call hierarchy leading to pc
 fn stack(args: &Vec<String>, use_offset: bool) {
     let path = &args[2];
     let pc = u32::from_str_radix(args[3].as_str(), 16).unwrap();
@@ -135,6 +155,7 @@ fn stack(args: &Vec<String>, use_offset: bool) {
         .expect("failed reading dump ");
 }
 
+/// load offset from path/offset or 0 if file is missing
 fn get_offset(path: &String) -> u32 {
     let file_offset = File::open(path.to_owned() + "/offset");
     match file_offset {
@@ -148,6 +169,9 @@ fn get_offset(path: &String) -> u32 {
     }
 }
 
+/// search Dumps for a register change to a specific value
+/// multiple dumps (with one value each) can be specified, in which case only results that make the
+/// change at the same program counter in each dump are printed
 fn search_value(args: &Vec<String>, use_offset: bool) {
     let mut dumps: Vec<Dump> = Vec::new();
     let mut values: Vec<u32> = Vec::new();
