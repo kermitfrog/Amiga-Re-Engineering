@@ -1,5 +1,5 @@
 [package]
-name = "dump-analyzers"
+name = "dump-analyzer"
 version = "0.1.0"
 authors = ["Arkadiusz Guzinski <kermit@ag.de1.cc>"]
 edition = "2018"

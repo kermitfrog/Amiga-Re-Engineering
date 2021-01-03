@@ -97,7 +97,7 @@ impl Dump {
                 for (pc, idx) in iter {
                     pc_new = *pc;
                     // if pc_new > pc_last + 10 {
-                    if pc_new == steps.get(singles_all[&pc_last]).unwrap().pc_next {
+                    if pc_new != steps.get(singles_all[&pc_last]).unwrap().pc_next {
                         singles.insert(*pc, *idx);
                         // println!("({:x}, {})", pc, idx);
                     }
@@ -180,7 +180,7 @@ impl Dump {
                         let mut s = String::new();
                         while res != 0 {
                             if res & 1 == 1 {
-                                s += format!(", D{}: {:x} -> {:x} ", idx,
+                                s += format!(", @{} D{}: {:x} -> {:x} ", index, idx,
                                              last.data[idx], current.data[idx]).as_str();
                             }
                             res /= 2;
@@ -335,5 +335,12 @@ impl Dump {
             println!("{}", line);
         }
         Ok(())
+    }
+
+    /// print starting points found in dump
+    pub fn starting_pcs(&self) {
+        for pc in self.singles.keys() {
+            println!("{:08X}", *pc);
+        }
     }
 }

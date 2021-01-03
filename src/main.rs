@@ -84,11 +84,15 @@ fn main() -> std::io::Result<()> {
         "T" => {
             stack(&args, true);
         }
+        "p" => {
+            let path = &args[2];
+            Dump::from_dir(path.to_string()).expect("could not load dump").starting_pcs();
+        }
         _ => {
             println!("\
-           {} [d|m|i|s|g|I|S] parameters\n\
+           {} [d|m|i|s|g|p|D|I|S] parameters\n\
            ... dir   is directory containing dump, named opcode.log\n\
-           ... pc    is the programm counter (value displayed above \"Next PC:\" in dump\n\
+           ... pc    is the programm counter (value displayed above \"Next PC:\") in dump\n\
            ... count is number of instructions before pc\n\n\
            d => search for value (dec) in dump\n\
            $ d dir val [dir val] .. \n\n\
@@ -96,10 +100,12 @@ fn main() -> std::io::Result<()> {
                 $ m dir pc count\n\n\
            i => print summary of instructions leading to pc (uses linux terminal colors)\n\
                 val is value to highlight (format as displayed, pairs of two [0-9,A-Z])\n\
-                $ m dir pc count [val]*  | less -R \n\n\
+           $ i dir pc count [val]*  | less -R \n\n\
            s => compact version of the above\n\n\
-           g => generate ghidra insruction pattern search text for code at pc\n\n\
-                $ g dir pc count\n\n\n\
+           g => generate ghidra insruction pattern search text for code at pc\n\
+                $ g dir pc count_after\n\n\
+           p => print starting pcs\n\
+                $ p dir\n\n\
            D|I|S => like d|i|s, but subtract value in dir/offset (one line, hex, no 0x) from pc\n\
            Do NOT rely on printed memory content! The values are at the time, the memory dump was made\n\
            and might have changed since then!

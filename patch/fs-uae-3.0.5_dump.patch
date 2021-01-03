@@ -1,0 +1,14 @@
+diff -rwu fs-uae-3.0.5/src/debug.cpp ../fs-uae-3.0.5/src/debug.cpp
+--- fs-uae-3.0.5/src/debug.cpp	2019-05-17 19:57:50.000000000 +0200
++++ ../fs-uae-3.0.5/src/debug.cpp	2021-01-02 14:13:28.132873433 +0100
+@@ -5258,7 +5258,9 @@
+ 		console_out (_T(">"));
+ 		console_flush ();
+ 		debug_linecounter = 0;
+-		v = console_get (input, MAX_LINEWIDTH);
++		v = 1;
++		input[0] = 't';
++		input[1] = '\n';
+ 		if (v < 0)
+ 			return;
+ 		if (v == 0)
