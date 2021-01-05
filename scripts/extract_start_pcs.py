@@ -2,6 +2,8 @@
 import os
 import sys
 
+# Extracting starting pcs is actually better done with dump-analyzer p now
+# This script is kept, because of the PC history file it creates
 PC = 1
 
 dump_dir = sys.argv[1]

@@ -14,8 +14,8 @@ build it.
 * the Amiga hunks loader plugin for ghidra (https://github.com/lab313ru/ghidra_amiga_ldr)
 * Some **basic knowledge of Assembler** (not necessarily MK68 - I just had some experience with 8085 and MIPS when I started this) and **C**
 * The M68K CPU Programmers Reference Manual (https://www.nxp.com/docs/en/reference-manual/M68000PRM.pdf)
-* The **rust** compiler and cargo (it's build manager) (https://www.rust-lang.org)
-* The **unencrypted and uncompressed** executable file(s) of the Game you want to reverse engineer. If you can open the file in a hex editor and find readable text, it's a good sign and you can continue. Otherwise you might need to use Ghidra to find out how to do that first. Maybe someone has already done it and you can find the clear version on the internet (as was the case for Ambermoon).
+* The **rust** compiler and cargo (it's build manager) (https://www.rust-lang.org) to build the dump-analyzer.
+* The **unencrypted and uncompressed** executable file(s) of the Game you want to reverse engineer. If you can open the file in a hex editor and find readable strings beyond the first few hundred bytes, it's a good sign and you can continue. Otherwise you might need to use Ghidra to find out how to do that first. Maybe someone has already done it and you can find the clear version on the internet (as was the case for Ambermoon).
 
 ##### Optional (for the less important scripts): #####
 
@@ -26,8 +26,8 @@ build it.
 
 ##### Contents of this repository #####
 
-* src/ Source for my dump-analyzer
-* patch/ patch to make fs-uae dump info on each cpu instruction
+* src/ Source for the dump-analyzer
+* patch/ patch to make FS-UAE dump info on each cpu instruction
 * scripts/ some optional helper scripts (or examples for scripts..)
 
 
@@ -202,7 +202,7 @@ These can help, because you see what actually happened this specific time. For m
 A full guide to Ghidra is outside the scope of this Readme (I guess it's a tutorial by now..), so I just concentrate on the first steps and the things that seemed most useful to me - besides I'm a beginner here myself.
 
 1. Create new project
-2. Import a file (shortcut: `i`)
+2. Import a file (shortcut: `I`)
 3. Choose the executable file. In case of Ambermoon there were 3. The Ambermoon - loader, AM2_CPU and AM2_BLIT, where AM2_CPU seems to contain all the interesting stuff. My guess is that AM2_BLIT is only used on certain hardware configurations.
 4. Format should be "Amiga Executable Hunks loader" - if you can't choose this, the plugin is probably not installed or activated.
 5. Open it and say __Yes__ when asked if it should be analyzed (use default values).
@@ -250,4 +250,43 @@ If you save this to a file `offset` in the dump directory, some commands in `dum
 
 Now you're ready to enter the iterative circle of reverse engineering, meaning: 
 * make notes in Ghidra
+* analyze dumps to find more functions
+* revise previous notes
+
+Every step will create more context, making Ghidra's output more clear.
+
+### A quick summary of things I found most useful in the FS-UAE debugger and Ghidra. ###
+
+#### FS-UAE debugger ####
+| Syntax | Description | Example |
+| :--- | :--- | :--- |
+| `?` | show command summary |  |
+| `f <address> ` | Add/remove breakpoint. | `f 0718A0B0` |
+| `fl` | List breakpoints | |
+| `t [instructions]` | Step one or more instructions. | |
+| `z` | Step through one instruction (subroutine) | |
+| `r <reg> <value>` | Modify CPU register | `r D0 00C4` |
+| `m <address> [<lines>]` | Memory dump starting at <address> | `m 0718A0B0 4` |
+| `W <address> <values[.x]>` | Write into Amiga memory. | `W 0718A0B2 A4B2` |
+| `g [<address>]` | Start execution at the current address or \<address\>. | `g` |
+
+#### Ghidra ####
+
+* **Comment** with `;`, if you have some thoughts on a part of code/data
+* **Label** a function or data location with `L` - if you know (or strongly suspect) what it does. This will make the label appear instead of an address everywhere it is called / accessed.
+* Define **data structures** via "Data Type Manager" -> \[program name\] -> right click -> New -> Structure, or from data segments with `[`. Then **set data type** with `T` (for data segments) or `Ctrl+L` (for variables).
+
+In time, what you see in Ghidra will look less like a bunch of wild numbers and more like this:
+
+![](assets/ghidra_decompile.png)
+
+#### And what is that M68K manual good for? ####
+The answer is: you can't always rely on the decompiler and should check the opcode!
+
+I had one case, where it showed something like `DAT_0024ACE0 = '\0'`, when the disassembler listing clearly showed, that instead of setting the value to 0, it was set to the value of a neighbouring memory cell. As far as I understand it, that value was initially 0, but would be changed at runtime. Ghidra did not know that, and made a false assumption.
+
+Because of things like this, it is important to understand the M68K opcode and it might be a good idea to figure out a few functions using the summary from `dump-analyzer` and the M68K manual for practice, before moving to Ghidra.
+
+And if you're wondering where PUSH and POP are... in M68K, register states are saved and restored to/from stack with MOVEM.
+
 
