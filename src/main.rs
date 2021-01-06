@@ -86,7 +86,13 @@ fn main() -> std::io::Result<()> {
         }
         "p" => {
             let path = &args[2];
-            Dump::from_dir(path.to_string()).expect("could not load dump").starting_pcs();
+            Dump::from_dir(path.to_string()).expect("could not load dump")
+                .starting_pcs(0);
+        }
+        "P" => {
+            let path = &args[2];
+            Dump::from_dir(path.to_string()).expect("could not load dump")
+                .starting_pcs(get_offset(path));
         }
         _ => {
             println!("\
@@ -106,7 +112,7 @@ fn main() -> std::io::Result<()> {
                 $ g dir pc count_after\n\n\
            p => print starting pcs\n\
                 $ p dir\n\n\
-           D|I|S => like d|i|s, but subtract value in dir/offset (one line, hex, no 0x) from pc\n\
+           D|I|S|P => like d|i|s|p, but subtract value in dir/offset (one line, hex, no 0x) from pc\n\
            Do NOT rely on printed memory content! The values are at the time, the memory dump was made\n\
            and might have changed since then!
            The program preprocesses opcode.log to opcode.bin for faster loading.\n\

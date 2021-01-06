@@ -338,9 +338,9 @@ impl Dump {
     }
 
     /// print starting points found in dump
-    pub fn starting_pcs(&self) {
+    pub fn starting_pcs(&self, offset: u32) {
         for pc in self.singles.keys() {
-            println!("{:08X}", *pc);
+            println!("{:08X}", *pc - offset);
         }
     }
 }
