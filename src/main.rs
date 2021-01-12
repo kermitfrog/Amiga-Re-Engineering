@@ -57,7 +57,8 @@ fn main() -> std::io::Result<()> {
         }
         "md" => { // parse memdump -- this is just for testing
             let path = &args[2];
-            let _md = MemDump::from_dir(path.to_string());
+            let md = MemDump::from_dir(path.to_string());
+            println!("{}", md.unwrap().to_string());
         }
         "i" => { // inspect.. dir pc pre [highlight str]*
             summary(&args, false, false)
