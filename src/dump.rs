@@ -343,4 +343,13 @@ impl Dump {
             println!("{:08X}", *pc - offset);
         }
     }
+    pub fn in_out_state(&self, start: u32, end: u32) {
+        for cpu_step in self.steps.iter() {
+            if cpu_step.pc == start {
+                println!("\n{}", cpu_step.to_string());
+            } else if cpu_step.pc == end {
+                println!("{}\n#####################################################", cpu_step.to_string());
+            }
+        }
+    }
 }

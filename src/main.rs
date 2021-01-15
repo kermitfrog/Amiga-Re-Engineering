@@ -31,6 +31,7 @@ use crate::utils::FormatHelper;
 use std::fs::File;
 use std::io::{BufReader, BufRead};
 use std::collections::BTreeMap;
+use core::cmp;
 
 extern crate rustc_serialize;
 
@@ -98,9 +99,15 @@ fn main() -> std::io::Result<()> {
             Dump::from_dir(path.to_string()).expect("could not load dump")
                 .starting_pcs(get_offset(path));
         }
+        "io" => {
+            in_out_state(&args, false);
+        }
+        "IO" => {
+            in_out_state(&args, true);
+        }
         _ => {
             println!("\
-           {} [d|m|i|s|g|p|D|I|S|M] parameters\n\
+           {} [d|m|i|s|g|p|D|I|S|M|P|io|IO] parameters\n\
            ... dir   is directory containing dump, named opcode.log\n\
            ... pc    is the programm counter (value displayed above \"Next PC:\") in dump\n\
            ... count is number of instructions before pc\n\n\
@@ -118,11 +125,14 @@ fn main() -> std::io::Result<()> {
                 $ p dir\n\n\
            M => map data to memory dump - finds locations of files in data_dir in memory dump, ignoring data with < 8 non-zero bytes\n\
                 $ M dir data_dir > dataMap.csv\n\n\
-           D|I|S|P => like d|i|s|p, but subtract value in dir/offset (one line, hex, no 0x) from pc\n\
+           io => print register states at specific pcs\n\
+                $ io dir pc_start pc_end\n\n\
+           D|I|S|P|M => like d|i|s|p|M, but subtract value in dir/offset (one line, hex, no 0x) from pc\n\
+           IO => like io, but add offset value to parameters\n\
            Do NOT rely on printed memory content! The values are at the time, the memory dump was made\n\
-           and might have changed since then!
+           and might have changed since then!\n\
            The program preprocesses opcode.log to opcode.bin for faster loading.\n\
-           If .log or program version has changed, you should delete .bin"
+           If .log or program version has changed, you might want to delete .bin"
                      , args[0]);
         }
     }
@@ -212,8 +222,17 @@ fn search_value(args: &Vec<String>, use_offset: bool) {
     }
     let mut i = 0;
     let mut results: Option<BTreeMap<u32, String>> = None;
+    let mut size: u8 = 1;
+    for val in &values {
+        size = cmp::max(size, match val {
+            0..=0xFF => 1,
+            0x100..=0xFF00 => 2,
+            _ => 4
+        });
+    }
+
     for dump in dumps {
-        results = Some(dump.search_for_register_change(*values.get(i).unwrap(), 2, results));
+        results = Some(dump.search_for_register_change(*values.get(i).unwrap(), size, results));
         i += 1;
     }
     for (k, v) in results.unwrap_or_default() {
@@ -231,4 +250,13 @@ fn map_data_to_mem(args: &Vec<String>) {
     let offset = get_offset(&dump_dir.to_string());
     let md = MemDump::from_dir(dump_dir.to_string()).expect("could not load memory");
     md.map_data(data_dir.to_string(), offset).unwrap();
+}
+
+fn in_out_state(args: &Vec<String>, use_offset: bool) {
+    let path = &args[2];
+    let dump = Dump::from_dir(path.to_string()).expect("could not load dump");
+    let offset = if use_offset { get_offset(&args[2]) } else { 0 };
+    let start = u32::from_str_radix(&args[3], 16).expect("could not parse start") + offset;
+    let end = u32::from_str_radix(&args[4], 16).expect("could not parse end") + offset;
+    dump.in_out_state(start, end);
 }
