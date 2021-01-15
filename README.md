@@ -196,7 +196,7 @@ There are some options...
 * Read the opcode.log, search for the pc and go up from there..
 * `./dump-analyzer i egil_7_dmg 71789EA 100 7 0a` will give you a summary of the 100 steps leading to the first occurence of 71789EA in the dump, highlighting values 7 and 0a (all hex).
 * `./dump-analyzer s egil_7_dmg 71789EA 100` will print a more compact summary without highlighting. I found this suitable for copying into a text editor and making notes.
-* `./dump-analyzer m egil_7_dmg 71789EA 100` will print commands, you can paste into the FS-UAE debugger, to make it dump associated memory, which you can save to a file called `mem` in the directory containing the dump. (remove all the leading `>` first!). This can improve the summaries above a bit - but don't forget that it's just the memory state at the exact time you pasted the commands!
+* `./dump-analyzer m egil_7_dmg 71789EA 100` (semi-deprecated) will print commands, you can paste into the FS-UAE debugger, to make it dump associated memory, which you can save to a file called `mem` in the directory containing the dump. (remove all the leading `>` first!). This can improve the summaries above a bit - but don't forget that it's just the memory state at the exact time you pasted the commands!I made this before noticing the `S` command, that can dump whole memory ranges to a file. But this may still be useful if you want to view a reduced part of memory in a text editor. `dump-analyzer` can read both this text output and the binary version.
 
 These can help, because you see what actually happened this specific time. For most of the work however, the main tool will now be Ghidra - so start it.
 A full guide to Ghidra is outside the scope of this Readme (I guess it's a tutorial by now..), so I just concentrate on the first steps and the things that seemed most useful to me - besides I'm a beginner here myself.
@@ -255,6 +255,44 @@ Now you're ready to enter the iterative circle of reverse engineering, meaning:
 
 Every step will create more context, making Ghidra's output more clear.
 
+#### Find data chunks in memory ####
+To improve your understanding of data access, you can use the `./dump-analyzer M <dir> <data_dir>` command.
+Wher `dir` is a directory, containing the memory dump. Both the text variant (filename=`mem`) as well as binary dumps (named as their starting address in hex, e.g. `07000000`) can be used.
+
+First you need to extract the data you want to search for into a directory structure. This should be something like `<data_dir>/filename_of_original_datafile/data_index`, e.g. `AMB/1Icon_gfx.amb/001`
+
+To get a full dump of all interesting memory, get into FS-UAEs debug mode and use
+`dm` to get the address space map. This will show something like
+```
+00000000    2048K/1 =    2048K Chip memory
+00200000    8192K/1 =    8192K Fast memory
+00A00000     512K/0 =     512K <none>
+00A80000    1024K/2 =     512K Kickstart ROM (14E93BCC)
+[...]
+07000000      16M/1 =      16M RAMSEY memory (low)
+08000000     896M/0 =     896M <none>
+40000000      16M/1 =      16M Zorro III Fast RAM
+41000000    3056M/0 =    3056M <none>
+```
+
+Things labeled <none> and ROM won't contain any interesting data, so just save what you need, like this:
+```
+S /tmp/00000000 00000000 00A00000
+S /tmp/07000000 07000000 01000000
+S /tmp/40000000 40000000 01000000
+```
+
+Then move the files to you `<dir>`. It is important that the file name is the starting address!
+
+With that we can call `./dump-analyzer M mem_battle AMB > dataMap.csv` which creates a nice TAB-separated file, we can open with a Spreadsheet application like libreoffice calc, or a text editor.
+```
+File        Index   Mem     Translated      Size
+1Map_data.amb   193     0x40088484      0x40088484      10338
+1Map_data.amb   036     0x40088484      0x40088484      10338
+[...]
+```
+You can use an offset file if you believe something is loaded into fixed locations, but usually the memory locations will be allocated by the OS at runtime. This makes it unsuited for searching in Ghidra, but can be helpful to make sense of the opcode.log / debugger output.
+
 ### A quick summary of things I found most useful in the FS-UAE debugger and Ghidra. ###
 
 #### FS-UAE debugger ####
@@ -266,7 +304,9 @@ Every step will create more context, making Ghidra's output more clear.
 | `t [instructions]` | Step one or more instructions. | |
 | `z` | Step through one instruction (subroutine) | |
 | `r <reg> <value>` | Modify CPU register | `r D0 00C4` |
+| `dm` | Dump current address space map. | |
 | `m <address> [<lines>]` | Memory dump starting at <address> | `m 0718A0B0 4` |
+| `S file <address> <length` | Dump memory to file | `S /tmp/07000000 07000000 01000000` |
 | `W <address> <values[.x]>` | Write into Amiga memory. | `W 0718A0B2 A4B2` |
 | `g [<address>]` | Start execution at the current address or \<address\>. | `g` |
 
@@ -288,5 +328,4 @@ I had one case, where it showed something like `DAT_0024ACE0 = '\0'`, when the d
 Because of things like this, it is important to understand the M68K opcode and it might be a good idea to figure out a few functions using the summary from `dump-analyzer` and the M68K manual for practice, before moving to Ghidra.
 
 And if you're wondering where PUSH and POP are... in M68K, register states are saved and restored to/from stack with MOVEM.
-
 

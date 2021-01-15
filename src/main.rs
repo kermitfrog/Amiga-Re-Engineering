@@ -60,6 +60,9 @@ fn main() -> std::io::Result<()> {
             let md = MemDump::from_dir(path.to_string());
             println!("{}", md.unwrap().to_string());
         }
+        "M" => {
+            map_data_to_mem(&args)
+        }
         "i" => { // inspect.. dir pc pre [highlight str]*
             summary(&args, false, false)
         }
@@ -97,7 +100,7 @@ fn main() -> std::io::Result<()> {
         }
         _ => {
             println!("\
-           {} [d|m|i|s|g|p|D|I|S] parameters\n\
+           {} [d|m|i|s|g|p|D|I|S|M] parameters\n\
            ... dir   is directory containing dump, named opcode.log\n\
            ... pc    is the programm counter (value displayed above \"Next PC:\") in dump\n\
            ... count is number of instructions before pc\n\n\
@@ -113,6 +116,8 @@ fn main() -> std::io::Result<()> {
                 $ g dir pc count_after\n\n\
            p => print starting pcs\n\
                 $ p dir\n\n\
+           M => map data to memory dump - finds locations of files in data_dir in memory dump, ignoring data with < 8 non-zero bytes\n\
+                $ M dir data_dir > dataMap.csv\n\n\
            D|I|S|P => like d|i|s|p, but subtract value in dir/offset (one line, hex, no 0x) from pc\n\
            Do NOT rely on printed memory content! The values are at the time, the memory dump was made\n\
            and might have changed since then!
@@ -214,4 +219,16 @@ fn search_value(args: &Vec<String>, use_offset: bool) {
     for (k, v) in results.unwrap_or_default() {
         println!("{:08X}{}", k - offset, v);
     }
+}
+
+fn map_data_to_mem(args: &Vec<String>) {
+    if args.len() < 4 {
+        return;
+    }
+    let dump_dir = &args[2];
+    let data_dir = &args[3];
+
+    let offset = get_offset(&dump_dir.to_string());
+    let md = MemDump::from_dir(dump_dir.to_string()).expect("could not load memory");
+    md.map_data(data_dir.to_string(), offset).unwrap();
 }

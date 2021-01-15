@@ -19,7 +19,7 @@ use std::fs::File;
 use std::io::{BufReader, BufRead, Read};
 use std::cmp::{min, max};
 use walkdir::WalkDir;
-use std::path::Component;
+use twoway;
 
 pub struct MemDump {
     /// structure for a partial memory dump
@@ -121,14 +121,15 @@ impl MemDump {
     }
 
     pub fn map_data(&self, path: String, offset: u32) -> std::io::Result<()> {
+        println!("File\tIndex\tMem\tTranslated\tSize");
         for entry_opt in WalkDir::new(path) {
             let entry = entry_opt?;
 
             let full_path = entry.path();
+            // println!("File = {}", full_path.to_str().unwrap());
             let mut components = entry.path().components().rev();
-
-            if let Some(dir) = components.next() {
-                if let Some(name) = components.next() {
+            if let Some(name) = components.next() {
+                if let Some(dir) = components.next() {
                     match File::open(full_path) {
                         Ok(file) =>
                             self.map_data_for(file,
@@ -148,11 +149,57 @@ impl MemDump {
     fn map_data_for(&self, mut file: File, pre: String, offset: u32) {
         let mut data = Vec::new();
         if let Ok(_) = file.read_to_end(&mut data) {
-
-
+            if !MemDump::check_entropy(&data) {
+                return;
+            }
+            for part in self.parts.iter() {
+                let mut last_pos = 0;
+                let start = part.from as usize;
+                let s_mod = (part.from - offset) as usize;
+                loop {
+                    let slice = &part.data.as_slice()[last_pos..];
+                    // println!("BLUB!!!! {}   {}", slice.len(), data.len());
+                    if let Some(pos) = twoway::find_bytes(&slice, data.as_slice()) {
+                        // if let Some(pos) = MemDump::find_bytes(&slice, data.as_slice()) {
+                        if last_pos > pos {
+                            break;
+                        }
+                        println!("{}0x{:08X}\t0x{:08X}\t{}", &pre,
+                                 start + pos,
+                                 s_mod + pos,
+                                 data.len()
+                        );
+                        last_pos = pos + 1;
+                    } else { break; }
+                }
+            }
         }
-
     }
+
+    fn check_entropy(data: &Vec<u8>) -> bool {
+        let mut size = data.len();
+        for byte in data.iter() {
+            if *byte == 0 {
+                size -= 1
+            }
+        }
+        size >= 8
+    }
+
+    /*    fn find_bytes(text: &[u8], pattern: &[u8]) -> Option<usize> {
+            println!("blub!!!! {}   {}", text.len(), pattern.len());
+            'outer: for i in 0..text.len() - pattern.len() {
+                println!("blub {}", i);
+                'inner: for j in 0..pattern.len() {
+                    println!("bla {}  {}", i, j);
+                    if text[i] != pattern[j] {
+                        continue 'outer;
+                    }
+                }
+                return Some(i);
+            }
+            None
+        }*/
 }
 
 impl ToString for MemDump {
