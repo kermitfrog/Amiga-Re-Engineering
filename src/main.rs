@@ -107,7 +107,7 @@ fn main() -> std::io::Result<()> {
         }
         _ => {
             println!("\
-           {} [d|m|i|s|g|p|D|I|S|M|P|io|IO] parameters\n\
+           {} [d|m|i|s|g|p|D|I|S|M|P|t|T|io|IO] parameters\n\
            ... dir   is directory containing dump, named opcode.log\n\
            ... pc    is the programm counter (value displayed above \"Next PC:\") in dump\n\
            ... count is number of instructions before pc\n\n\
@@ -125,9 +125,11 @@ fn main() -> std::io::Result<()> {
                 $ p dir\n\n\
            M => map data to memory dump - finds locations of files in data_dir in memory dump, ignoring data with < 8 non-zero bytes\n\
                 $ M dir data_dir > dataMap.csv\n\n\
+           t => print call hierarchy leading to pc\n\
+                $ t dir pc\n\n\
            io => print register states at specific pcs\n\
                 $ io dir pc_start pc_end\n\n\
-           D|I|S|P|M => like d|i|s|p|M, but subtract value in dir/offset (one line, hex, no 0x) from pc\n\
+           D|I|S|P|T => like d|i|s|p|t, but subtract value in dir/offset (one line, hex, no 0x) from pc\n\
            IO => like io, but add offset value to parameters\n\
            Do NOT rely on printed memory content! The values are at the time, the memory dump was made\n\
            and might have changed since then!\n\
