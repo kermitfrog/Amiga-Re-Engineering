@@ -24,13 +24,13 @@ extern crate serde_derive;
 #[macro_use]
 extern crate serde_big_array;
 
-use std::env;
+use std::{env, fs};
 use crate::dump::Dump;
 use crate::memdump::MemDump;
 use crate::utils::FormatHelper;
 use std::fs::File;
 use std::io::{BufReader, BufRead};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, BTreeSet};
 use core::cmp;
 
 extern crate rustc_serialize;
@@ -89,6 +89,12 @@ fn main() -> std::io::Result<()> {
         "T" => {
             stack(&args, true);
         }
+        "c" => {
+            show_calls(&args, false);
+        }
+        "C" => {
+            show_calls(&args, true);
+        }
         "p" => {
             let path = &args[2];
             Dump::from_dir(path.to_string()).expect("could not load dump")
@@ -104,6 +110,9 @@ fn main() -> std::io::Result<()> {
         }
         "IO" => {
             in_out_state(&args, true);
+        }
+        "sd" => {
+            mem_set_diff(&args);
         }
         _ => {
             println!("\
@@ -129,6 +138,8 @@ fn main() -> std::io::Result<()> {
                 $ t dir pc\n\n\
            io => print register states at specific pcs\n\
                 $ io dir pc_start pc_end\n\n\
+           sd => print differences between sets of memory dumps. dir contains directories named set_id\n\
+                $ sd dir\n\n\
            D|I|S|P|T => like d|i|s|p|t, but subtract value in dir/offset (one line, hex, no 0x) from pc\n\
            IO => like io, but add offset value to parameters\n\
            Do NOT rely on printed memory content! The values are at the time, the memory dump was made\n\
@@ -182,6 +193,16 @@ fn stack(args: &Vec<String>, use_offset: bool) {
     let fmt = FormatHelper::simple(true, 2, offset);
 
     Dump::from_dir(path.to_string()).expect("could not load dump").stack(pc, fmt)
+        .expect("failed reading dump ");
+}
+
+/// print complete call hierarchy
+fn show_calls(args: &Vec<String>, use_offset: bool) {
+    let path = &args[2];
+    let offset = if use_offset { get_offset(path) } else { 0 };
+    let fmt = FormatHelper::simple(true, 2, offset);
+
+    Dump::from_dir(path.to_string()).expect("could not load dump").calls(fmt)
         .expect("failed reading dump ");
 }
 
@@ -261,4 +282,74 @@ fn in_out_state(args: &Vec<String>, use_offset: bool) {
     let start = u32::from_str_radix(&args[3], 16).expect("could not parse start") + offset;
     let end = u32::from_str_radix(&args[4], 16).expect("could not parse end") + offset;
     dump.in_out_state(start, end);
+}
+
+/// check sets of memory dumps for bytes that differ between sets, but not inside them
+fn mem_set_diff(args: &Vec<String>) { // TODO improve error messages
+    let entries = fs::read_dir(&args[2]).expect("could not open dir");
+    let mut memdump_map: HashMap<String, Vec<MemDump>> = HashMap::new();
+    let offset = get_offset(&args[2]);
+
+    // load memdumps and group them by the part of filename before '_'
+    for entry in entries {
+        let entry = entry.expect("something wrong with entry");
+        let path = entry.path();
+        let file_name = entry.file_name();
+        let name_parts : Vec<&str> = file_name.to_str().unwrap_or_default().split('_').collect();
+
+        if name_parts.len() == 2 {
+            let key = name_parts[0];
+            let mem = MemDump::from_dir(path.to_str().expect("something wrong with path").to_string()).expect("could not load mem dump");
+            let val = memdump_map.get_mut(key);
+            match val {
+                Some(e) => {
+                    e.push(mem);
+                }
+                None => {
+                    let mut vec : Vec<MemDump> = Vec::new();
+                    vec.push(mem);
+                    memdump_map.insert(key.to_owned(), vec);
+                }
+            }
+        }
+    }
+
+    // no need to have a map anymore - transfer to a Vec
+    let mut memdump_vec : Vec<Vec<MemDump>> = Vec::new();
+    for (_, val) in memdump_map.drain() {
+        memdump_vec.push(val);
+    }
+
+    // look up offsets that are different between each set
+    // only the first memdump per set is checked, as the interesting parts are identical in each
+    // memdump of a set and the false offsets will be filtered out later
+    let mut results : Option<BTreeSet<u32>> = None; // we use a sorted set, to get a sorted output
+    for i in 0..memdump_vec.len() -1 {
+        // the first diff will check all memory, while subsequent diffs only need to check the
+        // offsets in results
+        for j in i+1..memdump_vec.len() {
+            results = Some(memdump_vec[i][0].diff_only(&memdump_vec[j][0], results, false));
+        }
+    }
+
+    // filter out bytes that change inside a set
+    for vec in memdump_vec {
+        for i in 0..vec.len() - 1 {
+            for j in i+1..vec.len() {
+                results = Some(vec[i].diff_only(&vec[j], results, true));
+            }
+        }
+    }
+
+    // output
+    if offset == 0 {
+        for r in results.expect("No Result") {
+            println!("{:08X}", r);
+        }
+    } else {
+        for r in results.expect("No Result") {
+            println!("{:08X}  {:08X}", r.wrapping_sub(offset), r);
+        }
+    }
+
 }

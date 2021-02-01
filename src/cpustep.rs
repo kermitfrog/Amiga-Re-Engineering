@@ -17,7 +17,7 @@
 use std::fs::File;
 use std::io::{self, BufRead};
 use serde::{Serialize, Deserialize};
-use crate::utils::FormatHelper;
+use crate::utils::*;
 use crate::memdump::MemDump;
 
 // use BigArray, as this is needed to allow serde to handle arrays beyond 32 elements
@@ -26,25 +26,25 @@ big_array! { BigArray; }
 pub struct CpuStep {
     /// an instruction step, containing the info about register state from fs-uae. note is the
     /// instruction as disassembled by fs-uae.
-    pub data: [u32; 8],
-    pub address: [u32; 8],
-    pub usp: u32,
-    pub isp: u32,
-    pub sfc: u32,
-    pub dfc: u32,
-    pub cacr: u32,
-    pub vbr: u32,
-    pub caar: u32,
-    pub msp: u32,
-    pub t: u8,
-    pub s: bool,
-    pub m: bool,
-    pub x: bool,
-    pub n: bool,
-    pub z: bool,
-    pub v: bool,
-    pub c: bool,
-    pub imask: bool,
+    pub data: [u32; 8], // data registers D0-D7
+    pub address: [u32; 8], // address registers A0-A7 (A7 is the current stack pointer)
+    pub usp: u32, // user stack pointer
+    pub isp: u32, // interrupt stack pointer
+    pub sfc: u32, // source function code register - only 68010+
+    pub dfc: u32, // destination function code register - only 68010+
+    pub cacr: u32, // cache control register - only 68020+
+    pub vbr: u32, // vector base register - only 68010+
+    pub caar: u32, // cache address register - only 68020/30
+    pub msp: u32, // master stack pointer register - only 68020+
+    pub t: u8, // trace enable (actually 2 bits)
+    pub s: bool, // supervisor/user state (switch active stack 0=user, 1=interrupt/master)
+    pub m: bool, // master/interrupt state (switch active stack 0=interrupt, 1=master)
+    pub x: bool, // extend
+    pub n: bool, // negative
+    pub z: bool, // zero
+    pub v: bool, // overflow
+    pub c: bool, // carry
+    pub imask: u8, // interrupt mask (actually 3 bits)
     pub stp: bool,
     pub pc: u32,
     pub pc_note: [u8; 24],
@@ -136,7 +136,7 @@ impl CpuStep {
             z: line_bits.get(23..=23).unwrap_or("0") == "1",
             v: line_bits.get(27..=27).unwrap_or("0") == "1",
             c: line_bits.get(31..=31).unwrap_or("0") == "1",
-            imask: line_bits.get(39..=39).unwrap_or("0") == "1",
+            imask: u8::from_str_radix(line_bits.get(39..=39).unwrap_or("0").as_ref(), 16).unwrap_or_default(),
             stp: line_bits.get(45..=45).unwrap_or("0") == "1",
             pc: u32::from_str_radix(line_pc.get(0..=7).unwrap_or("0").as_ref(), 16).unwrap_or_default(),
             pc_note: array_init::array_init({
@@ -171,15 +171,44 @@ impl CpuStep {
 
     /// returns change in call depth by this instruction
     pub fn depth_mod(&self) -> i16 {
+        // ignore changes from interrupts
+        if self.imask != 0 {
+            return 0
+        }
         /*
         +1 BSR, JSR
-        -1 RTS, RTR
+        -1 RTS, RTE (RTR is called RTE in log - probably only used to return from interrupt)
          */
         match self.note.get(0..3).unwrap_or_default() {
             [66, 83, 53] | [74, 83, 82] => 1,
-            [82, 84, 83] | [82, 84, 82] => -1,
+            [82, 84, 83] | [82, 84, 69] => -1,
             _ => 0
         }
+    }
+
+    /// print String showing PCs at call depth change
+    ///
+    /// other: instruction steps to compare with
+    /// fmt: formatting configuration
+    /// depth: current call depth. Used for padding and modified on change.
+    pub fn call_diff(&self, predecessor: &CpuStep, fmt: &FormatHelper, depth: &mut i16) {
+        let depth_m = predecessor.depth_mod();
+        *depth += depth_m;
+        match fmt.show_interrupt {
+            Visibility::Hidden => {}
+            Visibility::Note => {
+                if self.s && !predecessor.s {
+                    println!("{}Interrupt (mask={})", fmt.padding(*depth), self.imask);
+                    return;
+                }
+            }
+        }
+        if depth_m <= 0 {
+            return;
+        }
+        println!("{}{:08X}  ({:08X})", fmt.padding(*depth), fmt.with_offset(self.pc),
+                 fmt.with_offset(predecessor.pc) );
+        // std::str::from_utf8(&self.note).unwrap_or_default()).as_str();
     }
 
     /// Generate String showing the difference between 2 instruction steps
@@ -191,11 +220,11 @@ impl CpuStep {
     /// depth: current call depth. Used for padding and modified on change.
     pub fn pretty_diff(&self, other: &CpuStep, mem: &MemDump, fmt: &FormatHelper, num: usize, depth: &mut i16) -> String {
         let mut s = String::new();
-        let pad: usize = if *depth >= 0 {(*depth * fmt.indent) as usize} else {0};
+        let pad: usize = if *depth >= 0 { (*depth * fmt.indent) as usize } else { 0 };
         // let pad_inline = if compact {0i16} else { pad };
         let padding = format!("{:>width$}", "", width = pad);
         let mut delimiter = String::new();
-        if fmt.compact {delimiter += "  "} else {
+        if fmt.compact { delimiter += "  " } else {
             let nl = format!("\n{}", &padding);
             delimiter += nl.as_str();
         };
@@ -217,24 +246,24 @@ impl CpuStep {
         // address registers are only parsed for certain instructions
         let note = std::str::from_utf8(&self.note).unwrap_or_default();
         let print_memory =
-        match note.get(0..0).unwrap_or_default(){
-            "A" | "D" | "O" => true,
-            _ => {
-                match note.get(0..=1).unwrap_or_default() {
-                    "LS" | "RO" => true,
-                    _ => {
-                        match note.get(0..=2).unwrap_or_default() {
-                            "CMP" | "EOR" | "MUL" | "NEG" | "NOT" | "SBC" | "SUB" => true,
-                            _ => false
+            match note.get(0..0).unwrap_or_default() {
+                "A" | "D" | "O" => true,
+                _ => {
+                    match note.get(0..=1).unwrap_or_default() {
+                        "LS" | "RO" => true,
+                        _ => {
+                            match note.get(0..=2).unwrap_or_default() {
+                                "CMP" | "EOR" | "MUL" | "NEG" | "NOT" | "SBC" | "SUB" => true,
+                                _ => false
+                            }
                         }
                     }
                 }
-            }
-        };
+            };
         if print_memory { // TODO does not always work correctly
             print_spacing = false;
             for i in 2..self.note.len() - 1 {
-                let x = self.note.get(i..=i+1).unwrap();
+                let x = self.note.get(i..=i + 1).unwrap();
                 match x {
                     [65, 48..=57] => {
                         print_spacing = true;
@@ -255,10 +284,10 @@ impl CpuStep {
         }
         *depth += depth_m;
         if fmt.compact {
-            s += format!("\n{}{:08X}  {}", padding, self.pc - fmt.offset_mod,
+            s += format!("\n{}{:08X}  {}", padding, fmt.with_offset(self.pc) ,
                          std::str::from_utf8(&self.note).unwrap_or_default()).as_str();
         } else {
-            s += format!("\n{}\x1b[1m{:08X}\x1b[0m  {}{}", padding, self.pc - fmt.offset_mod,
+            s += format!("\n{}\x1b[1m{:08X}\x1b[0m  {}{}", padding, fmt.with_offset(self.pc),
                          std::str::from_utf8(&self.note).unwrap_or_default(), delimiter).as_str()
         }
         s
@@ -280,7 +309,7 @@ impl CpuStep {
                 diff -= 1;
             }
             Ok(s.trim_end().to_string())
-        }
+        };
     }
 }
 

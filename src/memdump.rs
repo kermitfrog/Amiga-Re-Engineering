@@ -20,6 +20,9 @@ use std::io::{BufReader, BufRead, Read};
 use std::cmp::{min, max};
 use walkdir::WalkDir;
 use twoway;
+use std::collections::BTreeSet;
+use std::process::exit;
+use std::ops::Index;
 
 pub struct MemDump {
     /// structure for a partial memory dump
@@ -186,6 +189,37 @@ impl MemDump {
         size >= 8
     }
 
+    pub fn diff_only(&self, other: &MemDump, only: Option<BTreeSet<u32>>, invert: bool) -> BTreeSet<u32> {
+        if self.parts.len() != other.parts.len() {
+            exit(1);
+        }
+        let mut results: BTreeSet<u32> = BTreeSet::new();
+        match only {
+            Some(only) => {
+                for i in only.iter() {
+                    if (self[*i] == other[*i]) == invert {
+                        results.insert(*i);
+                    }
+                }
+            },
+            None => {
+                for i in 0..self.parts.len() {
+                    let l_part = &self.parts[i];
+                    let r_part = &other.parts[i];
+                    if l_part.from != r_part.from || l_part.to != r_part.to {
+                        exit(1);
+                    }
+                    for j in 0..l_part.data.len() {
+                        if (l_part.data[j] == r_part.data[j]) == invert {
+                            results.insert(j as u32 + l_part.from);
+                        }
+                    }
+                }
+            }
+        }
+        results
+    }
+
     /*    fn find_bytes(text: &[u8], pattern: &[u8]) -> Option<usize> {
             println!("blub!!!! {}   {}", text.len(), pattern.len());
             'outer: for i in 0..text.len() - pattern.len() {
@@ -212,5 +246,18 @@ impl ToString for MemDump {
         }
         s += "]";
         s
+    }
+}
+
+impl Index<u32> for MemDump {
+    type Output = u8;
+
+    fn index(&self, index: u32) -> &Self::Output {
+        for part in &self.parts {
+            if (part.from..=part.to).contains(&index) {
+                return &part.data[(index - part.from) as usize]
+            }
+        }
+        return &self.parts[0].data[0]
     }
 }

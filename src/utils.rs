@@ -15,6 +15,8 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+pub enum Visibility { Hidden, Note }//, Verbose }
+
 /// stores variables for formatting the output
 pub struct FormatHelper {
     /// replace occurrences of value1 with value2 - used for terminal colors / bold
@@ -26,14 +28,16 @@ pub struct FormatHelper {
     /// how much space to use to indent per step of the call hierarchy
     pub indent: i16,
     /// pc offset for disassembler
-    pub offset_mod: u32
+    pub offset_mod: u32,
+    ///
+    pub show_interrupt: Visibility,
 }
 
 impl FormatHelper {
     /// highlights values, by replacing them with colored versions
     pub fn col(&self, s: String) -> String {
         if !self.colors {
-            return s
+            return s;
         }
         let mut t = s.to_owned();
         // TODO this is buggy - need to work through list, then see if something can be found at
@@ -41,7 +45,7 @@ impl FormatHelper {
         for (v, r) in &self.repl {
             if let Some(i) = s.find(v) {
                 if i % 2 == 0 {
-                    t.replace_range((t.len()-v.len())..t.len(), r.as_str());
+                    t.replace_range((t.len() - v.len())..t.len(), r.as_str());
                     return t.to_string();
                 }
             }
@@ -54,7 +58,7 @@ impl FormatHelper {
         let mut s = format!("{:08X}", val);
         for (v, r) in &self.repl {
             if s.ends_with(&v.as_str()) {
-                s.replace_range((8-v.len())..8, r.as_str());
+                s.replace_range((8 - v.len())..8, r.as_str());
             }
         }
         s
@@ -79,11 +83,36 @@ impl FormatHelper {
             replacements.push((h.to_string(), format!("{}{}\x1b[0m",
                                                       colors.get(i % colors.len()).unwrap(), h)));
         }
-        FormatHelper {repl: replacements, compact, colors: true, indent, offset_mod}
+        FormatHelper { repl: replacements, compact, colors: true, indent, offset_mod,
+            show_interrupt: Visibility::Note }
     }
 
     /// construct FormatHelper without highlighting
-    pub fn simple(compact: bool, indent: i16, offset_mod: u32) -> FormatHelper{
-        FormatHelper {repl: Vec::new(), compact, colors: false, indent, offset_mod}
+    pub fn simple(compact: bool, indent: i16, offset_mod: u32) -> FormatHelper {
+        FormatHelper { repl: Vec::new(), compact, colors: false, indent, offset_mod,
+            show_interrupt: Visibility::Note }
+    }
+
+    pub fn with_offset(&self, address: u32) -> u32 {
+        return if address >= self.offset_mod {
+            address - self.offset_mod
+        } else {
+            address + 0xf0000000
+        };
+    }
+
+    pub fn string(&self, address: u32) -> String {
+        return String::new();
+    }
+
+    pub fn padding(&self, depth: i16) -> String {
+        let pad_max: usize = 20;
+        let pad: usize = if depth >= 0 { (depth * self.indent) as usize } else { 0 };
+        // let pad_inline = if compact {0i16} else { pad };
+        return if pad <= pad_max {
+            format!("{:>width$}", "", width = pad)
+        } else {
+            format!("{:>width$}  ", depth, width = pad_max - 2)
+        };
     }
 }

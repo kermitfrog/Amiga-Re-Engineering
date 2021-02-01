@@ -337,6 +337,30 @@ impl Dump {
         Ok(())
     }
 
+    /// print full call tree
+    ///
+    /// fmt: contains formatting options
+    pub fn calls(&self, fmt: FormatHelper) -> Result<(), &str> {
+        // general preparation
+        let mut current = self.steps.first().expect("cpu step not found");
+        // get base depth
+        let mut depth: i16 = 0;
+        let mut min_depth: i16 = 0;
+        for i in 0..self.steps.len() {
+            depth += self.steps.get(i).expect("cpu step not found").depth_mod();
+            min_depth = min(min_depth, depth);
+        }
+        depth = 0 - min_depth;
+        for i in 1..self.steps.len() {
+            let last = current;
+            current = self.steps.get(i).expect("cpu step not found");
+            // println!("{:08X}  {}", last.pc - fmt.offset_mod,
+            //                    std::str::from_utf8(&last.note).unwrap_or_default()));
+            current.call_diff(&last, &fmt, &mut depth);
+        }
+        Ok(())
+    }
+
     /// print starting points found in dump
     pub fn starting_pcs(&self, offset: u32) {
         for pc in self.singles.keys() {
