@@ -196,7 +196,7 @@ impl CpuStep {
         *depth += depth_m;
         match fmt.show_interrupt {
             Visibility::Hidden => {}
-            Visibility::Note => {
+            Visibility::Brief | Visibility::Verbose => {
                 if self.s && !predecessor.s {
                     println!("{}Interrupt (mask={})", fmt.padding(*depth), self.imask);
                     return;

@@ -15,7 +15,14 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-pub enum Visibility { Hidden, Note }//, Verbose }
+use std::collections::BTreeSet;
+use std::fs::File;
+use std::io::{BufReader, BufRead};
+use std::cmp::Ordering;
+use clap::{ArgMatches, Values};
+use crate::utils::Visibility::{Hidden, Brief};
+
+pub enum Visibility { Hidden, Brief, Verbose }
 
 /// stores variables for formatting the output
 pub struct FormatHelper {
@@ -29,8 +36,22 @@ pub struct FormatHelper {
     pub indent: i16,
     /// pc offset for disassembler
     pub offset_mod: u32,
+    pub print_both_offsets: bool,
+    pub func_names: Visibility,
     ///
     pub show_interrupt: Visibility,
+    info: GhidraInfo
+}
+
+#[derive(Eq)]
+struct GhidraFun {
+    pub start: u32,
+    pub end: u32,
+    pub name: String,
+}
+
+struct GhidraInfo {
+    functions: BTreeSet<GhidraFun>
 }
 
 impl FormatHelper {
@@ -67,7 +88,8 @@ impl FormatHelper {
     /// construct FormatHelper with highlighting for certain values
     ///
     /// highlight: values to be colored
-    pub fn for_values(highlight: &Vec<String>, compact: bool, indent: i16, offset_mod: u32) -> FormatHelper {
+    pub fn for_values(highlight: &Values, compact: bool) -> FormatHelper {
+        // pub fn for_values(highlight: &Vec<String>, compact: bool) -> FormatHelper {
         // prepare colors
         let colors = [
             "\x1b[32m", // green
@@ -79,18 +101,108 @@ impl FormatHelper {
         ];
         let mut replacements: Vec<(String, String)> = Vec::new();
         replacements.reserve(highlight.len());
-        for (h, i) in highlight.iter().zip(0..) {
+        for (h, i) in highlight.to_owned().zip(0..) {
+            // for (h, i) in highlight.iter().zip(0..) {
             replacements.push((h.to_string(), format!("{}{}\x1b[0m",
                                                       colors.get(i % colors.len()).unwrap(), h)));
         }
-        FormatHelper { repl: replacements, compact, colors: true, indent, offset_mod,
-            show_interrupt: Visibility::Note }
+        FormatHelper {
+            repl: replacements,
+            compact,
+            colors: true,
+            indent: 2,
+            offset_mod: 0,
+            print_both_offsets: true,
+            func_names: Visibility::Verbose,
+            show_interrupt: Visibility::Brief,
+            info: GhidraInfo{functions: BTreeSet::new()}
+        }
     }
 
     /// construct FormatHelper without highlighting
-    pub fn simple(compact: bool, indent: i16, offset_mod: u32) -> FormatHelper {
-        FormatHelper { repl: Vec::new(), compact, colors: false, indent, offset_mod,
-            show_interrupt: Visibility::Note }
+    pub fn simple(compact: bool) -> FormatHelper {
+        FormatHelper {
+            repl: Vec::new(),
+            compact,
+            colors: false,
+            indent: 2,
+            offset_mod: 0,
+            print_both_offsets: true,
+            func_names: Visibility::Hidden,
+            show_interrupt: Visibility::Brief,
+            info: GhidraInfo{functions: BTreeSet::new()}
+        }
+    }
+
+    pub fn finalize(mut self, args: &ArgMatches) -> FormatHelper {
+        if args.value_of("colors").is_some() {
+            self.colors = true;
+        } else if args.value_of("nocolors").is_some() {
+            self.colors = false;
+        }
+
+        if let Some(indent) = args.value_of("indent") {
+            self.indent = i16::from_str_radix(indent, 10).unwrap_or(2);
+        }
+
+        match args.value_of("offset-mode") {
+            Some("dump") => {
+                self.offset_mod = 0;
+                self.print_both_offsets = false;
+            }
+            Some("translated") => {
+                self.offset_mod = FormatHelper::get_offset(&args);
+                self.print_both_offsets = false
+            },
+            Some("both") => {
+                self.offset_mod = FormatHelper::get_offset(&args);
+                self.print_both_offsets = true
+            },
+            _ => {}
+        }
+
+        match args.value_of("function-names") {
+            Some("never") => self.func_names = Hidden,
+            Some("entry") => self.func_names = Brief,
+            Some("always") => self.func_names = Visibility::Verbose,
+            _ => {}
+        }
+
+        if args.is_present("traps") {
+            self.show_interrupt = Brief;
+        }
+
+        // todo load ghidra info
+
+        return self
+    }
+
+    /// load offset from path/offset or 0 if file is missing
+    pub fn get_offset(args: &ArgMatches) -> u32 {
+        // TODO *really* understand this: (and maybe find better syntax)
+        let dir =
+            if let Some(d) = args.value_of("dir") {
+                d
+            } else if let Some(d) = args.value_of("set_dir") {
+                d
+            }
+            else if let Some(d) = args.values_of("dir_val").unwrap().next()
+            {
+                d
+            } else {
+                return 0;
+            };
+
+        let file_offset = File::open(dir.to_owned() + "/offset");
+        match file_offset {
+            Ok(file) => {
+                let mut buf_reader = BufReader::new(file);
+                let mut s = String::new();
+                let _ = buf_reader.read_line(&mut s);
+                u32::from_str_radix(&s.trim_end(), 16).unwrap_or_default()
+            }
+            Err(_) => 0u32
+        }
     }
 
     pub fn with_offset(&self, address: u32) -> u32 {
@@ -101,7 +213,7 @@ impl FormatHelper {
         };
     }
 
-    pub fn string(&self, address: u32) -> String {
+    pub fn pc(&self, pc: u32) -> String {
         return String::new();
     }
 
@@ -114,5 +226,23 @@ impl FormatHelper {
         } else {
             format!("{:>width$}  ", depth, width = pad_max - 2)
         };
+    }
+}
+
+impl Ord for GhidraFun {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.start.cmp(&other.start)
+    }
+}
+
+impl PartialOrd for GhidraFun {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for GhidraFun {
+    fn eq(&self, other: &Self) -> bool {
+        self.start == other.start
     }
 }
