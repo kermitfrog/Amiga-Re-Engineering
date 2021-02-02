@@ -16,12 +16,15 @@
  */
 
 use std::collections::BTreeSet;
-use std::fs::File;
-use std::io::{BufReader, BufRead};
+use std::fs::{File};
+use std::io::{BufReader, BufRead, Read};
 use std::cmp::Ordering;
 use clap::{ArgMatches, Values};
 use crate::utils::Visibility::{Hidden, Brief};
+use std::path::{PathBuf};
+use roxmltree::{Document, ParsingOptions};
 
+#[derive(Eq, PartialEq)]
 pub enum Visibility { Hidden, Brief, Verbose }
 
 /// stores variables for formatting the output
@@ -40,7 +43,7 @@ pub struct FormatHelper {
     pub func_names: Visibility,
     ///
     pub show_interrupt: Visibility,
-    info: GhidraInfo
+    info: GhidraInfo,
 }
 
 #[derive(Eq)]
@@ -51,7 +54,8 @@ struct GhidraFun {
 }
 
 struct GhidraInfo {
-    functions: BTreeSet<GhidraFun>
+    functions: BTreeSet<GhidraFun>,
+    offset: u32
 }
 
 impl FormatHelper {
@@ -115,7 +119,7 @@ impl FormatHelper {
             print_both_offsets: true,
             func_names: Visibility::Verbose,
             show_interrupt: Visibility::Brief,
-            info: GhidraInfo{functions: BTreeSet::new()}
+            info: GhidraInfo { functions: BTreeSet::new(), offset: 0 },
         }
     }
 
@@ -128,9 +132,9 @@ impl FormatHelper {
             indent: 2,
             offset_mod: 0,
             print_both_offsets: true,
-            func_names: Visibility::Hidden,
+            func_names: Visibility::Brief,
             show_interrupt: Visibility::Brief,
-            info: GhidraInfo{functions: BTreeSet::new()}
+            info: GhidraInfo { functions: BTreeSet::new(), offset: 0 },
         }
     }
 
@@ -153,12 +157,16 @@ impl FormatHelper {
             Some("translated") => {
                 self.offset_mod = FormatHelper::get_offset(&args);
                 self.print_both_offsets = false
-            },
+            }
             Some("both") => {
                 self.offset_mod = FormatHelper::get_offset(&args);
                 self.print_both_offsets = true
-            },
-            _ => {}
+            }
+            _ => {
+                if self.print_both_offsets {
+                    self.offset_mod = FormatHelper::get_offset(&args);
+                }
+            }
         }
 
         match args.value_of("function-names") {
@@ -168,40 +176,30 @@ impl FormatHelper {
             _ => {}
         }
 
+        if self.func_names != Hidden {
+            self.info.load(args, self.offset_mod);
+        }
+
         if args.is_present("traps") {
             self.show_interrupt = Brief;
         }
 
         // todo load ghidra info
 
-        return self
+        return self;
     }
 
     /// load offset from path/offset or 0 if file is missing
     pub fn get_offset(args: &ArgMatches) -> u32 {
-        // TODO *really* understand this: (and maybe find better syntax)
-        let dir =
-            if let Some(d) = args.value_of("dir") {
-                d
-            } else if let Some(d) = args.value_of("set_dir") {
-                d
-            }
-            else if let Some(d) = args.values_of("dir_val").unwrap().next()
-            {
-                d
-            } else {
-                return 0;
-            };
-
-        let file_offset = File::open(dir.to_owned() + "/offset");
+        let file_offset = FormatHelper::file_in_dir_or_parent(&args, "offset");
         match file_offset {
-            Ok(file) => {
+            Some(file) => {
                 let mut buf_reader = BufReader::new(file);
                 let mut s = String::new();
                 let _ = buf_reader.read_line(&mut s);
                 u32::from_str_radix(&s.trim_end(), 16).unwrap_or_default()
             }
-            Err(_) => 0u32
+            None => 0u32
         }
     }
 
@@ -214,7 +212,24 @@ impl FormatHelper {
     }
 
     pub fn pc(&self, pc: u32) -> String {
-        return String::new();
+        match (&self.func_names, &self.print_both_offsets) {
+            (Hidden, false) => format!("{:08X}", self.with_offset(pc)),
+            (Hidden, true) => format!("{:08X} ({:08X})", self.with_offset(pc), pc),
+            (_, false) => {
+                if let Some(s) = self.info.name_for(pc) {
+                    format!("{} ({:08X})", s, self.with_offset(pc))
+                } else {
+                    format!("{:08X}", self.with_offset(pc))
+                }
+            },
+            (_, true) => {
+                if let Some(s) = self.info.name_for(pc) {
+                    format!("{} ({:08X}, {:08X})", s, self.with_offset(pc), pc)
+                } else {
+                    format!("{:08X} ({:08X})", self.with_offset(pc), pc)
+                }
+            }
+        }
     }
 
     pub fn padding(&self, depth: i16) -> String {
@@ -226,6 +241,88 @@ impl FormatHelper {
         } else {
             format!("{:>width$}  ", depth, width = pad_max - 2)
         };
+    }
+
+    pub fn file_in_dir_or_parent(args: &ArgMatches, f_name: &str) -> Option<File> {
+        let mut path = PathBuf::from(
+            if let Some(d) = args.value_of("dir") {
+                d
+            } else if let Some(d) = args.value_of("set_dir") {
+                d
+            } else if let Some(d) = args.values_of("dir_val").unwrap().next()
+            {
+                d
+            } else {
+                return None;
+            });
+        path.push(f_name);
+        if !path.exists() {
+            path.pop();
+            path.pop();
+            path.push(f_name);
+        }
+        if let Ok(file) = File::open(path) {
+            Some(file)
+        } else {
+            None
+        }
+    }
+}
+
+impl GhidraInfo {
+    pub fn load(&mut self, args: &ArgMatches, offset: u32) {
+        self.offset = offset;
+        if let Some(mut file) = FormatHelper::file_in_dir_or_parent(&args, "functions.xml") {
+            let mut content = String::new();
+            if file.read_to_string(&mut content).is_err() {
+                return;
+            }
+            match Document::parse_with_options(content.as_str(), ParsingOptions{allow_dtd: true}) {
+            Ok(xml) =>
+                if let Some(funs) = xml.descendants()
+                    .find(|&n| n.has_tag_name("FUNCTIONS")) {
+                    for fun in funs.children() {
+                        let mut gf = GhidraFun::new();
+                        if let Some(name) = fun.attribute("NAME") {
+                            gf.name = name.into();
+                        } else { continue; }
+
+                        if let Some(addresses) = fun.children()
+                            .find(|&n| n.has_tag_name("ADDRESS_RANGE")) {
+                            if let Some(val) = addresses.attribute("START") {
+                                gf.start = u32::from_str_radix(val, 16).unwrap_or(0)
+                            } else { continue; }
+
+                            if let Some(val) = addresses.attribute("END") {
+                                gf.end = u32::from_str_radix(val, 16).unwrap_or(0)
+                            } else { continue; }
+                        } else { continue; }
+
+                        if gf.start != 0 && gf.end != 0 {
+                            self.functions.insert(gf);
+                        }
+                    }
+                },
+                Err(e) => println!("Error loading functions.xml: {}", e)
+            }
+        }
+    }
+
+    pub fn name_for(&self, address: u32) -> Option<String> {
+        let pc = address.wrapping_sub(self.offset);
+        let tmp = GhidraFun{start: pc, end: pc, name: String::new()};
+        if let Some(closest) = self.functions.range(..=tmp).next_back() {
+            if (closest.start..=closest.end).contains(&pc) {
+                return Some(closest.name.to_owned())
+            }
+        }
+        None
+    }
+}
+
+impl GhidraFun {
+    pub fn new() -> GhidraFun {
+        GhidraFun { start: 0, end: 0, name: String::new() }
     }
 }
 

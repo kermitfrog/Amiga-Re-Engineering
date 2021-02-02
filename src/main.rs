@@ -24,13 +24,13 @@ extern crate serde_derive;
 #[macro_use]
 extern crate serde_big_array;
 
-use std::{env, fs};
+use std::{fs};
 use crate::dump::Dump;
 use crate::memdump::MemDump;
 use crate::utils::{FormatHelper};
 use std::collections::{BTreeMap, HashMap, BTreeSet};
 use core::cmp;
-use clap::{Arg, App, ArgMatches};
+use clap::{Arg, App, ArgMatches, ValueHint, AppSettings};
 
 extern crate rustc_serialize;
 
@@ -40,8 +40,14 @@ fn main() -> std::io::Result<()> {
         if !opcode.bin -> transform opcode.log to opcode.bin
      */
     let matches = App::new("Dump-Analyzer")
-        .author("Arkadiusz Guzinski <kermit@ag.de1.cc")
-        .about("Helps you make sense of hacked FS-UAE instruction dump")
+        .setting(AppSettings::ArgRequiredElseHelp)
+        .setting(AppSettings::VersionlessSubcommands)
+        .author("Arkadiusz Guzinski <kermit@ag.de1.cc>")
+        .about("Helps you make sense of hacked FS-UAE instruction dump\nFor most commands\n\
+           ... dir   is a directory containing the associated data, see help-fs for filename details\n\
+           ... pc    is the program counter (value displayed above \"Next PC:\") in hex\n\
+           ... count is number of instructions before|after pc (depending on subcommand)
+        ")
         .arg(Arg::new("compact").short('s').global(true)
             .about("use compact mode for summary")
         )
@@ -68,91 +74,206 @@ fn main() -> std::io::Result<()> {
         )
 
         .subcommand(App::new("search-value").visible_aliases(&["d", "D"])
-            .about("searches for a value in one or more dumps")
-            .arg(Arg::new("dir val").multiple(true).min_values(2).required(true))
+            .setting(AppSettings::ArgRequiredElseHelp)
+            .about("searches for a value (dec) in one or more dumps")
+            .arg(Arg::new("dir val").multiple(true).min_values(2).required(true)
+                .about("pairs of directory with dump and a search value in decimal")
+            )
         )
 
         .subcommand(App::new("print-mem-commands").visible_alias("m")
-            .about("print commands to get memdump for related addresses from fs-uae debugger")
-            .arg(Arg::new("dir").required(true).index(1))
-            .arg(Arg::new("pc").required(true).index(2))
-            .arg(Arg::new("count").required(true).index(3))
+            .setting(AppSettings::ArgRequiredElseHelp)
+            .about("print commands to get memdump only for related addresses from fs-uae debugger")
+            .long_about("print commands to get memdump only for related addresses from fs-uae debugger\n\
+                This may be useful if you want to look at the memory yourself.\n\
+                For getting all memory it's probably better to simply use the 'S' debugger command")
+            .arg(Arg::new("dir").required(true).index(1)
+                .value_hint(ValueHint::DirPath)
+                .about("directory containing memory dump")
+            )
+            .arg(Arg::new("pc").required(true).index(2)
+                .value_hint(ValueHint::Other)
+                .about("program counter (hex)")
+            )
+            .arg(Arg::new("count").required(true).index(3)
+                .value_hint(ValueHint::Other)
+                .about("lines of memory around the actual data")
+            )
         )
 
         .subcommand(App::new("summary-long").visible_aliases(&["i", "I"])
+            .setting(AppSettings::ArgRequiredElseHelp)
             .about("print summary of instructions leading to pc (uses linux terminal colors)")
-            .arg(Arg::new("dir").required(true).index(1))
-            .arg(Arg::new("pc").required(true).index(2))
-            .arg(Arg::new("count").required(true).index(3))
-            .arg(Arg::new("val").multiple(true).index(4))
+            .arg(Arg::new("dir").required(true).index(1)
+                .value_hint(ValueHint::DirPath)
+                .about("directory containing the dump")
+            )
+            .arg(Arg::new("pc").required(true).index(2)
+                .about("program counter (hex)")
+                .value_hint(ValueHint::Other)
+            )
+            .arg(Arg::new("count").required(true).index(3)
+                .about("number of instructions to print before pc")
+                .value_hint(ValueHint::Other)
+            )
+            .arg(Arg::new("val").multiple(true).index(4)
+                .about("values to highlight; format is as printed (hex)")
+                .value_hint(ValueHint::Other)
+            )
         )
 
         .subcommand(App::new("summary").visible_aliases(&["s", "S"])
+            .setting(AppSettings::ArgRequiredElseHelp)
             .about("print compact summary of instructions leading to pc")
-            .arg(Arg::new("dir").required(true).index(1))
-            .arg(Arg::new("pc").required(true).index(2))
-            .arg(Arg::new("count").required(true).index(3))
-            .arg(Arg::new("val").multiple(true).index(4))
+            .arg(Arg::new("dir").required(true).index(1)
+                .value_hint(ValueHint::DirPath)
+                .about("directory containing the dump")
+            )
+            .arg(Arg::new("pc").required(true).index(2)
+                .about("program counter (hex)")
+                .value_hint(ValueHint::Other)
+            )
+            .arg(Arg::new("count").required(true).index(3)
+                .about("number of instructions to print before pc")
+                .value_hint(ValueHint::Other)
+            )
+            .arg(Arg::new("val").multiple(true).index(4)
+                .about("values to highlight; format is as printed (hex)")
+                .value_hint(ValueHint::Other)
+            )
         )
 
         .subcommand(App::new("print-ghidra-search-pattern").visible_alias("g")
+            .setting(AppSettings::ArgRequiredElseHelp)
             .about("generate ghidra instruction pattern search text for code at pc")
-            .arg(Arg::new("dir").required(true).index(1))
-            .arg(Arg::new("pc").required(true).index(2))
-            .arg(Arg::new("count").index(3))
+            .arg(Arg::new("dir").required(true).index(1)
+                .about("directory containing the dump")
+                .value_hint(ValueHint::DirPath)
+            )
+            .arg(Arg::new("pc").required(true).index(2)
+                .about("program counter (hex)")
+                .value_hint(ValueHint::Other)
+            )
+            .arg(Arg::new("count").index(3)
+                .about("number of instructions to print after pc (default: 30)")
+                .value_hint(ValueHint::Other)
+            )
         )
 
         .subcommand(App::new("starting-pcs").visible_aliases(&["p", "P"])
+            .setting(AppSettings::ArgRequiredElseHelp)
             .about("print starting pcs for functions that are called just once in dump")
-            .arg(Arg::new("dir").required(true).index(1))
+            .arg(Arg::new("dir").required(true).index(1)
+                .about("directory containing the dump")
+                .value_hint(ValueHint::DirPath)
+            )
         )
 
         .subcommand(App::new("map-data").visible_alias("M")
+            .setting(AppSettings::ArgRequiredElseHelp)
             .about("map data to memory dump")
-            .arg(Arg::new("dir").required(true).index(1))
-            .arg(Arg::new("data-dir").required(true).index(2))
+            .arg(Arg::new("dir").required(true).index(1)
+                .about("directory containing the memory dump")
+                .value_hint(ValueHint::DirPath)
+            )
+            .arg(Arg::new("data-dir").required(true).index(2)
+                .value_hint(ValueHint::DirPath)
+            )
         )
 
         .subcommand(App::new("stack").visible_aliases(&["t", "T"])
+            .setting(AppSettings::ArgRequiredElseHelp)
             .about("print call hierarchy leading to pc")
-            .arg(Arg::new("dir").required(true).index(1))
-            .arg(Arg::new("pc").required(true).index(2))
+            .arg(Arg::new("dir").required(true).index(1)
+                .about("directory containing the dump")
+                .value_hint(ValueHint::DirPath)
+            )
+            .arg(Arg::new("pc").required(true).index(2)
+                .about("program counter (hex)")
+                .value_hint(ValueHint::Other)
+            )
         )
 
         .subcommand(App::new("registers").visible_aliases(&["io", "IO"])
+            .setting(AppSettings::ArgRequiredElseHelp)
             .about(" print register states at specific pcs")
-            .arg(Arg::new("dir").required(true).index(1))
-            .arg(Arg::new("pc_start").required(true).index(2))
-            .arg(Arg::new("pc_end").required(true).index(3))
+            .arg(Arg::new("dir").required(true).index(1)
+                .about("directory containing the dump")
+                .value_hint(ValueHint::DirPath)
+            )
+            .arg(Arg::new("pc_start").required(true).index(2)
+                .about("program counter at start of a function (hex)")
+                .value_hint(ValueHint::Other)
+            )
+            .arg(Arg::new("pc_end").required(true).index(3)
+                .about("program counter at end of a function (hex)")
+                .value_hint(ValueHint::Other)
+            )
         )
 
         .subcommand(App::new("memset-diff").visible_alias("sd")
+            .setting(AppSettings::ArgRequiredElseHelp)
             .about("print differences between sets of memory dumps. dir contains directories named set_id")
-            .arg(Arg::new("set_dir").required(true).index(1))
+            .arg(Arg::new("set_dir").required(true).index(1)
+                .about("dir containing directories named set_id (see help-fs)")
+                .value_hint(ValueHint::DirPath)
+            )
         )
 
         .subcommand(App::new("calls").visible_aliases(&["c", "C"])
+            .setting(AppSettings::ArgRequiredElseHelp)
             .about("print call hierarchy of dump")
-            .arg(Arg::new("dir").required(true).index(1))
+            .arg(Arg::new("dir").required(true).index(1)
+                .about("directory containing the dump")
+                .value_hint(ValueHint::DirPath)
+            )
         )
+
+        .subcommand(App::new("help-fs").about("print info about the expected file structure"))
 
         .get_matches();
 
     match matches.subcommand() {
-        Some(("search-value", sub_args)) => search_value(&sub_args), // search for value in dump :: dir val [dir val] ..
-        Some(("print-mem-commands", sub_args)) => print_mem_commands(&sub_args), // get mem info commands :: dump pc num_before
-        Some(("summary-long", sub_args)) => summary(&sub_args, false), // summary dir pc pre [highlight str]*
-        Some(("summary", sub_args)) => summary(&sub_args, true), // inspect dir pc pre [highlight str]*
-        Some(("map-data", sub_args)) => map_data_to_mem(&sub_args),
-        Some(("print-ghidra-search-pattern", sub_args)) => print_ghidra_search_pattern(&sub_args),
-        Some(("stack", sub_args)) => stack(&sub_args),
         Some(("calls", sub_args)) => show_calls(&sub_args),
-        Some(("starting-pcs", sub_args)) => print_starting_pcs(&sub_args),
-        Some(("registers", sub_args)) => in_out_state(&sub_args),
+        Some(("help-fs", _)) => print_help_fs(),
+        Some(("map-data", sub_args)) => map_data_to_mem(&sub_args),
         Some(("memset-diff", sub_args)) => mem_set_diff(&sub_args),
+        Some(("print-ghidra-search-pattern", sub_args)) => print_ghidra_search_pattern(&sub_args),
+        Some(("print-mem-commands", sub_args)) => print_mem_commands(&sub_args), // get mem info commands :: dump pc num_before
+        Some(("registers", sub_args)) => in_out_state(&sub_args),
+        Some(("search-value", sub_args)) => search_value(&sub_args), // search for value in dump :: dir val [dir val] ..
+        Some(("stack", sub_args)) => stack(&sub_args),
+        Some(("starting-pcs", sub_args)) => print_starting_pcs(&sub_args),
+        Some(("summary", sub_args)) => summary(&sub_args, true), // inspect dir pc pre [highlight str]*
+        Some(("summary-long", sub_args)) => summary(&sub_args, false), // summary dir pc pre [highlight str]*
         _ => println!("Unknown")
     }
     Ok(())
+}
+
+fn print_help_fs() {
+    println!("{}",
+    "This program expects the data to be inside a directory, following a specific naming scheme\n\
+     dir contains:\n\
+         opcode.log   this is the instruction dump, as generated by the modified FS-UAE.\n\
+         opcode.bin   is the above, preprocessed to a binary format for faster loading.
+             it may be necessary to delete after an update of the program or opcode.log\n\
+         offset       file containing only one hex value that can be subtracted from the program
+             counter to print the direct address for Ghidra or similar tools.\n\
+         mem          memory dump in text form\n\
+         [0-9,A-F]{8} binary memory dump - the preferred way.. the name is a 8-digit hexadecimal
+             value, equal to the starting address, e.g. 00000000 or 07000000\n\
+         functions.xml  Ghidra xml export, containing function information.\n\
+\n\
+offset and functions.xml will be used from parent of dir, if not found\n\
+\n\
+    For the memset-diff command, set_dir expects a directory, containing directories with memory\n\
+    dumps, all applying to the same range of memory. These directories are named set_id, where
+    set          is the name of the set
+    id           can be anything not containing underscores\n\
+    Then the command will print the positions of values that differ between all memory dumps of\n\
+    different sets, but are equal within a set."
+    )
 }
 
 /*
@@ -376,7 +497,8 @@ fn mem_set_diff(args: &ArgMatches) { // TODO improve error messages
 fn print_ghidra_search_pattern(args: &ArgMatches) {
     let path = args.value_of("dir").unwrap();
     let pc = u32::from_str_radix(args.value_of("pc").unwrap(), 16).unwrap();
-    let num_after = usize::from_str_radix(args.value_of("count").unwrap(), 10).unwrap();
+    let num_after = usize::from_str_radix(
+        args.value_of("count").unwrap_or("30"), 10).unwrap();
     Dump::from_dir(path.to_string()).expect("could not load dump")
         .ghidra_search(pc, num_after).expect("generating search pattern failed");
 }

@@ -206,7 +206,7 @@ impl CpuStep {
         if depth_m <= 0 {
             return;
         }
-        println!("{}{:08X}  ({:08X})", fmt.padding(*depth), fmt.with_offset(self.pc),
+        println!("{}{}  from {:08X}", fmt.padding(*depth), fmt.pc(self.pc),
                  fmt.with_offset(predecessor.pc) );
         // std::str::from_utf8(&self.note).unwrap_or_default()).as_str();
     }
