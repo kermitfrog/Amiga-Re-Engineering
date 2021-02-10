@@ -18,6 +18,7 @@ mod cpustep;
 mod dump;
 mod memdump;
 mod utils;
+mod cli;
 
 extern crate serde;
 extern crate serde_derive;
@@ -30,7 +31,7 @@ use crate::memdump::MemDump;
 use crate::utils::{FormatHelper};
 use std::collections::{BTreeMap, HashMap, BTreeSet};
 use core::cmp;
-use clap::{Arg, App, ArgMatches, ValueHint, AppSettings};
+use clap::{ArgMatches};
 
 extern crate rustc_serialize;
 
@@ -39,199 +40,7 @@ fn main() -> std::io::Result<()> {
         Logic: mode dir val [dir val]{*}
         if !opcode.bin -> transform opcode.log to opcode.bin
      */
-    let matches = App::new("Dump-Analyzer")
-        .setting(AppSettings::ArgRequiredElseHelp)
-        .setting(AppSettings::VersionlessSubcommands)
-        .author("Arkadiusz Guzinski <kermit@ag.de1.cc>")
-        .about("Helps you make sense of hacked FS-UAE instruction dump\nFor most commands\n\
-           ... dir   is a directory containing the associated data, see help-fs for filename details\n\
-           ... pc    is the program counter (value displayed above \"Next PC:\") in hex\n\
-           ... count is number of instructions before|after pc (depending on subcommand)
-        ")
-        .arg(Arg::new("compact").short('s').global(true)
-            .about("use compact mode for summary")
-        )
-        .arg(Arg::new("colors").short('c').global(true)
-            .about("use console colors")
-        )
-        .arg(Arg::new("no-colors").short('b').global(true)
-            .about("disable console colors").conflicts_with("colors")
-        )
-        .arg(Arg::new("indent").short('i').global(true)
-            .about("intent by [num] spaces")
-            .takes_value(true)
-        )
-        .arg(Arg::new("offset-mode").short('o').global(true)
-            .about("print program counters as..")
-            .possible_values(&["dump", "translated", "both"])
-        )
-        .arg(Arg::new("function-names").short('n').global(true)
-            .about("print function names if possible")
-            .possible_values(&["never", "entry", "always"])
-        )
-        .arg(Arg::new("traps").short('t').global(true)
-            .about("show interrupts (traps)")
-        )
-
-        .subcommand(App::new("search-value").visible_aliases(&["d", "D"])
-            .setting(AppSettings::ArgRequiredElseHelp)
-            .about("searches for a value (dec) in one or more dumps")
-            .arg(Arg::new("dir val").multiple(true).min_values(2).required(true)
-                .about("pairs of directory with dump and a search value in decimal")
-            )
-        )
-
-        .subcommand(App::new("print-mem-commands").visible_alias("m")
-            .setting(AppSettings::ArgRequiredElseHelp)
-            .about("print commands to get memdump only for related addresses from fs-uae debugger")
-            .long_about("print commands to get memdump only for related addresses from fs-uae debugger\n\
-                This may be useful if you want to look at the memory yourself.\n\
-                For getting all memory it's probably better to simply use the 'S' debugger command")
-            .arg(Arg::new("dir").required(true).index(1)
-                .value_hint(ValueHint::DirPath)
-                .about("directory containing memory dump")
-            )
-            .arg(Arg::new("pc").required(true).index(2)
-                .value_hint(ValueHint::Other)
-                .about("program counter (hex)")
-            )
-            .arg(Arg::new("count").required(true).index(3)
-                .value_hint(ValueHint::Other)
-                .about("lines of memory around the actual data")
-            )
-        )
-
-        .subcommand(App::new("summary-long").visible_aliases(&["i", "I"])
-            .setting(AppSettings::ArgRequiredElseHelp)
-            .about("print summary of instructions leading to pc (uses linux terminal colors)")
-            .arg(Arg::new("dir").required(true).index(1)
-                .value_hint(ValueHint::DirPath)
-                .about("directory containing the dump")
-            )
-            .arg(Arg::new("pc").required(true).index(2)
-                .about("program counter (hex)")
-                .value_hint(ValueHint::Other)
-            )
-            .arg(Arg::new("count").required(true).index(3)
-                .about("number of instructions to print before pc")
-                .value_hint(ValueHint::Other)
-            )
-            .arg(Arg::new("val").multiple(true).index(4)
-                .about("values to highlight; format is as printed (hex)")
-                .value_hint(ValueHint::Other)
-            )
-        )
-
-        .subcommand(App::new("summary").visible_aliases(&["s", "S"])
-            .setting(AppSettings::ArgRequiredElseHelp)
-            .about("print compact summary of instructions leading to pc")
-            .arg(Arg::new("dir").required(true).index(1)
-                .value_hint(ValueHint::DirPath)
-                .about("directory containing the dump")
-            )
-            .arg(Arg::new("pc").required(true).index(2)
-                .about("program counter (hex)")
-                .value_hint(ValueHint::Other)
-            )
-            .arg(Arg::new("count").required(true).index(3)
-                .about("number of instructions to print before pc")
-                .value_hint(ValueHint::Other)
-            )
-            .arg(Arg::new("val").multiple(true).index(4)
-                .about("values to highlight; format is as printed (hex)")
-                .value_hint(ValueHint::Other)
-            )
-        )
-
-        .subcommand(App::new("print-ghidra-search-pattern").visible_alias("g")
-            .setting(AppSettings::ArgRequiredElseHelp)
-            .about("generate ghidra instruction pattern search text for code at pc")
-            .arg(Arg::new("dir").required(true).index(1)
-                .about("directory containing the dump")
-                .value_hint(ValueHint::DirPath)
-            )
-            .arg(Arg::new("pc").required(true).index(2)
-                .about("program counter (hex)")
-                .value_hint(ValueHint::Other)
-            )
-            .arg(Arg::new("count").index(3)
-                .about("number of instructions to print after pc (default: 30)")
-                .value_hint(ValueHint::Other)
-            )
-        )
-
-        .subcommand(App::new("starting-pcs").visible_aliases(&["p", "P"])
-            .setting(AppSettings::ArgRequiredElseHelp)
-            .about("print starting pcs for functions that are called just once in dump")
-            .arg(Arg::new("dir").required(true).index(1)
-                .about("directory containing the dump")
-                .value_hint(ValueHint::DirPath)
-            )
-        )
-
-        .subcommand(App::new("map-data").visible_alias("M")
-            .setting(AppSettings::ArgRequiredElseHelp)
-            .about("map data to memory dump")
-            .arg(Arg::new("dir").required(true).index(1)
-                .about("directory containing the memory dump")
-                .value_hint(ValueHint::DirPath)
-            )
-            .arg(Arg::new("data-dir").required(true).index(2)
-                .value_hint(ValueHint::DirPath)
-            )
-        )
-
-        .subcommand(App::new("stack").visible_aliases(&["t", "T"])
-            .setting(AppSettings::ArgRequiredElseHelp)
-            .about("print call hierarchy leading to pc")
-            .arg(Arg::new("dir").required(true).index(1)
-                .about("directory containing the dump")
-                .value_hint(ValueHint::DirPath)
-            )
-            .arg(Arg::new("pc").required(true).index(2)
-                .about("program counter (hex)")
-                .value_hint(ValueHint::Other)
-            )
-        )
-
-        .subcommand(App::new("registers").visible_aliases(&["io", "IO"])
-            .setting(AppSettings::ArgRequiredElseHelp)
-            .about(" print register states at specific pcs")
-            .arg(Arg::new("dir").required(true).index(1)
-                .about("directory containing the dump")
-                .value_hint(ValueHint::DirPath)
-            )
-            .arg(Arg::new("pc_start").required(true).index(2)
-                .about("program counter at start of a function (hex)")
-                .value_hint(ValueHint::Other)
-            )
-            .arg(Arg::new("pc_end").required(true).index(3)
-                .about("program counter at end of a function (hex)")
-                .value_hint(ValueHint::Other)
-            )
-        )
-
-        .subcommand(App::new("memset-diff").visible_alias("sd")
-            .setting(AppSettings::ArgRequiredElseHelp)
-            .about("print differences between sets of memory dumps. dir contains directories named set_id")
-            .arg(Arg::new("set_dir").required(true).index(1)
-                .about("dir containing directories named set_id (see help-fs)")
-                .value_hint(ValueHint::DirPath)
-            )
-        )
-
-        .subcommand(App::new("calls").visible_aliases(&["c", "C"])
-            .setting(AppSettings::ArgRequiredElseHelp)
-            .about("print call hierarchy of dump")
-            .arg(Arg::new("dir").required(true).index(1)
-                .about("directory containing the dump")
-                .value_hint(ValueHint::DirPath)
-            )
-        )
-
-        .subcommand(App::new("help-fs").about("print info about the expected file structure"))
-
-        .get_matches();
+    let matches = cli::args().get_matches();
 
     match matches.subcommand() {
         Some(("calls", sub_args)) => show_calls(&sub_args),
@@ -357,8 +166,9 @@ fn search_value(args: &ArgMatches) {
 //    args: &Vec<String>, use_offset: bool) {
     let mut dumps: Vec<Dump> = Vec::new();
     let mut values: Vec<u32> = Vec::new();
-    let offset = FormatHelper::get_offset(&args);
-    let mut dir_val = args.values_of("dir_val").unwrap_or_default();
+    let fmt = FormatHelper::simple(true).finalize(args);
+    // let offset = FormatHelper::get_offset(&args);
+    let mut dir_val = args.values_of("dir val").unwrap_or_default();
     if dir_val.len() % 2 == 1 {
         println!("value missing for dir");
         return;
@@ -389,7 +199,7 @@ fn search_value(args: &ArgMatches) {
         i += 1;
     }
     for (k, v) in results.unwrap_or_default() {
-        println!("{:08X}{}", k - offset, v); // TODO use FormatHelper
+        println!("{}{}", fmt.pc(k), v); // TODO use FormatHelper
     }
 }
 

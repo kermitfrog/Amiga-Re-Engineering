@@ -23,6 +23,7 @@ use clap::{ArgMatches, Values};
 use crate::utils::Visibility::{Hidden, Brief};
 use std::path::{PathBuf};
 use roxmltree::{Document, ParsingOptions};
+use std::iter::Peekable;
 
 #[derive(Eq, PartialEq)]
 pub enum Visibility { Hidden, Brief, Verbose }
@@ -55,7 +56,7 @@ struct GhidraFun {
 
 struct GhidraInfo {
     functions: BTreeSet<GhidraFun>,
-    offset: u32
+    offset: u32,
 }
 
 impl FormatHelper {
@@ -221,7 +222,7 @@ impl FormatHelper {
                 } else {
                     format!("{:08X}", self.with_offset(pc))
                 }
-            },
+            }
             (_, true) => {
                 if let Some(s) = self.info.name_for(pc) {
                     format!("{} ({:08X}, {:08X})", s, self.with_offset(pc), pc)
@@ -233,7 +234,7 @@ impl FormatHelper {
     }
 
     pub fn padding(&self, depth: i16) -> String {
-        let pad_max: usize = 20;
+        let pad_max: usize = 60;
         let pad: usize = if depth >= 0 { (depth * self.indent) as usize } else { 0 };
         // let pad_inline = if compact {0i16} else { pad };
         return if pad <= pad_max {
@@ -244,14 +245,19 @@ impl FormatHelper {
     }
 
     pub fn file_in_dir_or_parent(args: &ArgMatches, f_name: &str) -> Option<File> {
+        let mut p: Peekable<Values>;
         let mut path = PathBuf::from(
             if let Some(d) = args.value_of("dir") {
                 d
             } else if let Some(d) = args.value_of("set_dir") {
                 d
-            } else if let Some(d) = args.values_of("dir_val").unwrap().next()
+            } else if let Some(d) = args.values_of("dir val")
             {
-                d
+                if d.len() < 2 {
+                    return None;
+                }
+                p = d.peekable();
+                p.peek().unwrap()
             } else {
                 return None;
             });
@@ -277,32 +283,32 @@ impl GhidraInfo {
             if file.read_to_string(&mut content).is_err() {
                 return;
             }
-            match Document::parse_with_options(content.as_str(), ParsingOptions{allow_dtd: true}) {
-            Ok(xml) =>
-                if let Some(funs) = xml.descendants()
-                    .find(|&n| n.has_tag_name("FUNCTIONS")) {
-                    for fun in funs.children() {
-                        let mut gf = GhidraFun::new();
-                        if let Some(name) = fun.attribute("NAME") {
-                            gf.name = name.into();
-                        } else { continue; }
-
-                        if let Some(addresses) = fun.children()
-                            .find(|&n| n.has_tag_name("ADDRESS_RANGE")) {
-                            if let Some(val) = addresses.attribute("START") {
-                                gf.start = u32::from_str_radix(val, 16).unwrap_or(0)
+            match Document::parse_with_options(content.as_str(), ParsingOptions { allow_dtd: true }) {
+                Ok(xml) =>
+                    if let Some(funs) = xml.descendants()
+                        .find(|&n| n.has_tag_name("FUNCTIONS")) {
+                        for fun in funs.children() {
+                            let mut gf = GhidraFun::new();
+                            if let Some(name) = fun.attribute("NAME") {
+                                gf.name = name.into();
                             } else { continue; }
 
-                            if let Some(val) = addresses.attribute("END") {
-                                gf.end = u32::from_str_radix(val, 16).unwrap_or(0)
-                            } else { continue; }
-                        } else { continue; }
+                            if let Some(addresses) = fun.children()
+                                .find(|&n| n.has_tag_name("ADDRESS_RANGE")) {
+                                if let Some(val) = addresses.attribute("START") {
+                                    gf.start = u32::from_str_radix(val, 16).unwrap_or(0)
+                                } else { continue; }
 
-                        if gf.start != 0 && gf.end != 0 {
-                            self.functions.insert(gf);
+                                if let Some(val) = addresses.attribute("END") {
+                                    gf.end = u32::from_str_radix(val, 16).unwrap_or(0)
+                                } else { continue; }
+                            } else { continue; }
+
+                            if gf.start != 0 && gf.end != 0 {
+                                self.functions.insert(gf);
+                            }
                         }
-                    }
-                },
+                    },
                 Err(e) => println!("Error loading functions.xml: {}", e)
             }
         }
@@ -310,10 +316,10 @@ impl GhidraInfo {
 
     pub fn name_for(&self, address: u32) -> Option<String> {
         let pc = address.wrapping_sub(self.offset);
-        let tmp = GhidraFun{start: pc, end: pc, name: String::new()};
+        let tmp = GhidraFun { start: pc, end: pc, name: String::new() };
         if let Some(closest) = self.functions.range(..=tmp).next_back() {
             if (closest.start..=closest.end).contains(&pc) {
-                return Some(closest.name.to_owned())
+                return Some(closest.name.to_owned());
             }
         }
         None
