@@ -13,7 +13,7 @@ build it.
 * **Ghidra** (https://ghidra-sre.org)
 * the Amiga hunks loader plugin for ghidra (https://github.com/lab313ru/ghidra_amiga_ldr)
 * Some **basic knowledge of Assembler** (not necessarily MK68 - I just had some experience with 8085 and MIPS when I started this) and **C**
-* The M68K CPU Programmers Reference Manual (https://www.nxp.com/docs/en/reference-manual/M68000PRM.pdf)
+* The M68K CPU Programmers Reference Manual (https://www.nxp.com/docs/en/reference-manual/M68000PRM.pdf). I also recommend MarkeyJester’s Motorola 68000 Beginner’s Tutorial (http://mrjester.hapisan.com/04_MC68/), which is less detailed, but much easier to understand.
 * The **rust** compiler and cargo (it's build manager) (https://www.rust-lang.org) to build the dump-analyzer.
 * The **unencrypted and uncompressed** executable file(s) of the Game you want to reverse engineer. If you can open the file in a hex editor and find readable strings beyond the first few hundred bytes, it's a good sign and you can continue. Otherwise you might need to use Ghidra to find out how to do that first. Maybe someone has already done it and you can find the clear version on the internet (as was the case for Ambermoon).
 

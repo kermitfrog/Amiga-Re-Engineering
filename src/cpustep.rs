@@ -180,7 +180,7 @@ impl CpuStep {
         -1 RTS, RTE (RTR is called RTE in log - probably only used to return from interrupt)
          */
         match self.note.get(0..3).unwrap_or_default() {
-            [66, 83, 53] | [74, 83, 82] => 1,
+            [66, 83, 82] | [74, 83, 82] => 1,
             [82, 84, 83] | [82, 84, 69] => -1,
             _ => 0
         }
