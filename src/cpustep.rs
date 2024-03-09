@@ -173,7 +173,7 @@ impl CpuStep {
     pub fn depth_mod(&self) -> i16 {
         // ignore changes from interrupts
         if self.imask != 0 {
-            return 0
+            return 0;
         }
         /*
         +1 BSR, JSR
@@ -186,28 +186,31 @@ impl CpuStep {
         }
     }
 
+    // pub fn depth_mod_with_interrupt(&self) -> i16 {}
     /// print String showing PCs at call depth change
     ///
     /// other: instruction steps to compare with
     /// fmt: formatting configuration
     /// depth: current call depth. Used for padding and modified on change.
     pub fn call_diff(&self, predecessor: &CpuStep, fmt: &FormatHelper, depth: &mut i16) {
-        let depth_m = predecessor.depth_mod();
+        let mut depth_m = predecessor.depth_mod();
         *depth += depth_m;
-        match fmt.show_interrupt {
-            Visibility::Hidden => {}
-            Visibility::Brief | Visibility::Verbose => {
-                if self.s && !predecessor.s {
+        if self.s && !predecessor.s {
+            depth_m += 1;
+            match fmt.show_interrupt {
+                Visibility::Hidden => { return; }
+                Visibility::Brief => {
                     println!("{}Interrupt (mask={})", fmt.padding(*depth), self.imask);
                     return;
                 }
+                Visibility::Verbose => {}
             }
         }
         if depth_m <= 0 {
             return;
         }
         println!("{}{}  from {:08X}", fmt.padding(*depth), fmt.pc(self.pc),
-                 fmt.with_offset(predecessor.pc) );
+                 fmt.with_offset(predecessor.pc));
         // std::str::from_utf8(&self.note).unwrap_or_default()).as_str();
     }
 
@@ -284,7 +287,7 @@ impl CpuStep {
         }
         *depth += depth_m;
         if fmt.compact {
-            s += format!("\n{}{:08X}  {}", padding, fmt.with_offset(self.pc) ,
+            s += format!("\n{}{:08X}  {}", padding, fmt.with_offset(self.pc),
                          std::str::from_utf8(&self.note).unwrap_or_default()).as_str();
         } else {
             s += format!("\n{}\x1b[1m{:08X}\x1b[0m  {}{}", padding, fmt.with_offset(self.pc),
@@ -312,6 +315,7 @@ impl CpuStep {
         };
     }
 }
+
 
 impl ToString for CpuStep {
     /// output as from fs-uae

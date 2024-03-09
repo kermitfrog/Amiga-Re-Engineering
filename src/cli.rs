@@ -39,6 +39,7 @@ pub fn args() -> clap::App<'static> {
             .setting(AppSettings::ArgRequiredElseHelp)
             .about("searches for a value (dec) in one or more dumps")
             .arg(Arg::new("dir val").multiple(true).min_values(2).required(true)
+                .value_hint(ValueHint::DirPath)// TODO make this work... why doesn't it?
                 .about("pairs of directory with dump and a search value in decimal")
             )
         )

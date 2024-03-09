@@ -351,6 +351,8 @@ impl Dump {
             min_depth = min(min_depth, depth);
         }
         depth = 0 - min_depth;
+
+        // do output
         for i in 1..self.steps.len() {
             let last = current;
             current = self.steps.get(i).expect("cpu step not found");
